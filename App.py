@@ -8,6 +8,9 @@ import json
 from io import BytesIO
 from PIL import Image
 
+# Definer en fast sti til cache-filen, så den overlever genstarter
+CACHE_FILE = ".streamlit/description_cache.json"
+
 def analyze_image_with_openai(image_path):
     """Bruger OpenAI Vision API til at analysere billedet og generere en beskrivelse."""
     openai.api_key = os.getenv("OPENAI_API_KEY")  # Henter API-nøgle fra miljøvariabler
@@ -19,13 +22,12 @@ def analyze_image_with_openai(image_path):
                 {"role": "system", "content": "You are an assistant that describes fashion products based on images."},
                 {"role": "user", "content": "Describe this fashion product in a concise, professional way."}
             ],
-            files=[("image", image_file)]
+            files={"image": image_file}
         )
     return response["choices"][0]["message"]["content"]
 
 def load_cache():
     """Indlæser cache-filen hvis den findes."""
-    CACHE_FILE = "description_cache.json"
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r") as file:
             return json.load(file)
@@ -33,7 +35,7 @@ def load_cache():
 
 def save_cache(cache):
     """Gemmer cache-filen."""
-    CACHE_FILE = "description_cache.json"
+    os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)  # Sikrer at mappen eksisterer
     with open(CACHE_FILE, "w") as file:
         json.dump(cache, file)
 

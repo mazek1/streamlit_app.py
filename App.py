@@ -69,7 +69,13 @@ def update_b2c_tags(df):
         df.loc[mask, "B2C Tags"] = df.loc[mask, "B2C Tags"].apply(
             lambda x: ",".join(set(x.split(",") + values)).strip(",")
         )
-
+    
+    # Tilføj det første ord fra Style Name (uden "SR") som tag
+    df["First Word Tag"] = df["Style Name"].str.split().str[0].str.replace("SR", "").str.strip()
+    df["B2C Tags"] = df.apply(lambda row: ",".join(set([row["B2C Tags"], row["First Word Tag"]])) if row["First Word Tag"] else row["B2C Tags"], axis=1)
+    df["B2C Tags"] = df["B2C Tags"].str.strip(",")
+    df.drop(columns=["First Word Tag"], inplace=True)
+    
     return df
 
 def process_excel_and_zip(excel_file, zip_file):

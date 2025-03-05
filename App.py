@@ -55,12 +55,20 @@ def update_b2c_tags(df):
         "_tag_grs": ["_tag_grs"]
     }
 
-    df["B2C Tags"] = df["B2C Tags"].fillna("")
+    df["B2C Tags"] = df["B2C Tags"].fillna("").astype(str)
 
     for key, values in tag_translations.items():
-        df.loc[df["Style Name"].str.contains(key, case=False, na=False), "B2C Tags"] += ("," if df["B2C Tags"] != "" else "") + ",".join(values)
-
-    df["B2C Tags"] = df["B2C Tags"].apply(lambda x: ",".join(set(x.strip(",").split(","))) if x else x)
+        mask = df["Style Name"].str.contains(key, case=False, na=False)
+        df.loc[mask, "B2C Tags"] = df.loc[mask, "B2C Tags"].apply(
+            lambda x: ",".join(set(x.split(",") + values)).strip(",")
+        )
+    
+    # Tilføj det første ord fra Style Name (uden "SR") som tag
+    df["First Word Tag"] = df["Style Name"].str.split().str[0].str.replace("SR", "").str.strip()
+    df["B2C Tags"] = df.apply(lambda row: ",".join(set([row["B2C Tags"], row["First Word Tag"]])) if row["First Word Tag"] else row["B2C Tags"], axis=1)
+    df["B2C Tags"] = df["B2C Tags"].str.strip(",")
+    df.drop(columns=["First Word Tag"], inplace=True)
+    
     return df
 
 def process_excel_and_zip(excel_file, zip_file):
@@ -72,7 +80,7 @@ def process_excel_and_zip(excel_file, zip_file):
     with tempfile.TemporaryDirectory() as temp_dir:
         with zipfile.ZipFile(zip_file, 'r') as zip_ref:
             zip_ref.extractall(temp_dir)
-            image_files = {file for file in os.listdir(temp_dir) if file.endswith((".jpg", ".png", ".jpeg"))}
+            image_files = {file for file in os.listdir(temp_dir) if file.endswith((".jpg", ".png", "jpeg"))}
         
         # Find style-numre fra billedfiler
         style_numbers = {file[:10] for file in image_files if file.startswith("SR")}

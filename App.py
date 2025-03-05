@@ -12,15 +12,15 @@ from PIL import Image
 CACHE_FILE = ".streamlit/description_cache.json"
 
 def analyze_image_with_openai(image_path):
-    """Bruger OpenAI Vision API til at analysere billedet og generere en beskrivelse."""
+    """Bruger OpenAI Vision API til at analysere billedet og generere en professionel, inspirerende, kortfattet og salgsmæssig beskrivelse med tre key points."""
     openai.api_key = os.getenv("OPENAI_API_KEY")  # Henter API-nøgle fra miljøvariabler
     
     with open(image_path, "rb") as image_file:
         response = openai.ChatCompletion.create(
             model="gpt-4-vision-preview",
             messages=[
-                {"role": "system", "content": "You are an assistant that describes fashion products based on images."},
-                {"role": "user", "content": "Describe this fashion product in a concise, professional way."}
+                {"role": "system", "content": "You are an assistant that describes fashion products in a professional, inspiring, concise, and sales-oriented way. Each description should include three key points formatted as bullet points."},
+                {"role": "user", "content": "Describe this fashion product, ensuring a professional tone, engaging language, and highlighting three key selling points."}
             ],
             files={"image": image_file}
         )
@@ -96,7 +96,7 @@ def process_excel_and_zip(excel_file, zip_file):
         # Opdater description baseret på AI-analyse af billeder
         for index, row in df.iterrows():
             style_no = row["Style No."]
-            if pd.isna(row["Description"]) and style_no in style_numbers:
+            if style_no in style_numbers:
                 if style_no in cache:
                     df.at[index, "Description"] = cache[style_no]
                 else:
@@ -119,6 +119,7 @@ def process_excel_and_zip(excel_file, zip_file):
         df.to_excel(tmp.name, index=False, sheet_name='Updated Data')
         tmp_path = tmp.name
     
+    st.success("Processing Completed!")
     return tmp_path
 
 # Streamlit UI

@@ -24,7 +24,7 @@ def analyze_image_with_openai(image_path):
             ],
             files={"image": image_file}
         )
-    return response["choices"][0]["message"]["content"]
+    return response["choices"][0]["message"]["content"] if "choices" in response else "No description available."
 
 def load_cache():
     """Indlæser cache-filen hvis den findes."""
@@ -68,12 +68,12 @@ def process_excel_and_zip(excel_file, zip_file):
                 image_path = os.path.join(temp_dir, next(f for f in image_files if f.startswith(style_no)))
                 
                 if style_no in cache:
-                    df.at[index, "Description"] = cache[style_no]
+                    description = cache[style_no]
                 else:
                     description = analyze_image_with_openai(image_path)
-                    df.at[index, "Description"] = description
                     cache[style_no] = description  # Gem i cache
                 
+                df.at[index, "Description"] = description  # Opdater Excel-data
                 processed_images += 1
                 progress_bar.progress(processed_images / total_images)
         

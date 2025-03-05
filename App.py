@@ -46,6 +46,32 @@ def save_cache(cache):
     with open(CACHE_FILE, "w") as file:
         json.dump(cache, file)
 
+def update_b2c_tags(df):
+    """Opdaterer B2C Tags baseret på Style Name og Quality"""
+    tag_translations = {
+        "shirt": ["shirt", "shirts", "skjorte", "skjorter", "hemd", "hemden"],
+        "blouse": ["blouse", "blouses", "blus", "blusar", "bluse", "blusen"],
+        "dress": ["dress", "dresses", "klänning", "klänningar", "kleid", "kleider"],
+        "pants": ["pants", "trousers", "byxor", "hose"],
+        "skirt": ["skirt", "skirts", "kjol", "kjolar", "rock", "röcke"],
+        "jacket": ["jacket", "jackets", "jacka", "jackor", "jacke", "jacken"],
+        "blazer": ["blazer", "blazers", "kavaj", "kavajer", "sakko", "sakkos"],
+        "knit": ["knit", "knitwear", "strik", "stickat", "gestrickt"],
+        "ecovero": ["ecovero"],
+        "gots": ["gots", "_tag_gots"],
+        "_tag_grs": ["_tag_grs"]
+    }
+
+    df["B2C Tags"] = df["B2C Tags"].fillna("").astype(str)
+
+    for key, values in tag_translations.items():
+        mask = df["Style Name"].str.contains(key, case=False, na=False)
+        df.loc[mask, "B2C Tags"] = df.loc[mask, "B2C Tags"].apply(
+            lambda x: ",".join(set(x.split(",") + values)).strip(",")
+        )
+
+    return df
+
 def process_excel_and_zip(excel_file, zip_file):
     # Indlæs Excel-fil
     xls = pd.ExcelFile(excel_file)

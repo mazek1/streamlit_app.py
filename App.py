@@ -49,6 +49,7 @@ def update_b2c_tags(df):
         "skirt": ["skirt", "skirts", "kjol", "kjolar", "rock", "röcke"],
         "jacket": ["jacket", "jackets", "jacka", "jackor", "jacke", "jacken"],
         "blazer": ["blazer", "blazers", "kavaj", "kavajer", "sakko", "sakkos"],
+        "knit": ["knit", "knitwear", "strik", "stickat", "gestrickt"],
         "ecovero": ["ecovero"],
         "gots": ["gots", "_tag_gots"],
         "_tag_grs": ["_tag_grs"]
@@ -57,9 +58,9 @@ def update_b2c_tags(df):
     df["B2C Tags"] = df["B2C Tags"].fillna("")
 
     for key, values in tag_translations.items():
-        df.loc[df["Style Name"].str.contains(key, case=False, na=False), "B2C Tags"] += "," + ",".join(values)
+        df.loc[df["Style Name"].str.contains(key, case=False, na=False), "B2C Tags"] += ("," if df["B2C Tags"] != "" else "") + ",".join(values)
 
-    df["B2C Tags"] = df["B2C Tags"].apply(lambda x: ",".join(set(x.split(","))) if x else x)
+    df["B2C Tags"] = df["B2C Tags"].apply(lambda x: ",".join(set(x.strip(",").split(","))) if x else x)
     return df
 
 def process_excel_and_zip(excel_file, zip_file):

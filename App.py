@@ -9,8 +9,7 @@ from PIL import Image
 
 def analyze_image_with_openai(image_path):
     """Bruger OpenAI Vision API til at analysere billedet og generere en beskrivelse."""
-    import os
-openai.api_key = os.getenv("OPENAI_API_KEY")
+    openai.api_key = os.getenv("OPENAI_API_KEY")  # Henter API-nøgle fra miljøvariabler
     
     with open(image_path, "rb") as image_file:
         response = openai.ChatCompletion.create(

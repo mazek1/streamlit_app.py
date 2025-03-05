@@ -2,7 +2,26 @@ import streamlit as st
 import pandas as pd
 import zipfile
 import os
+import tempfile
+import openai
 from io import BytesIO
+from PIL import Image
+
+def analyze_image_with_openai(image_path):
+    """Bruger OpenAI Vision API til at analysere billedet og generere en beskrivelse."""
+    import os
+openai.api_key = os.getenv("OPENAI_API_KEY")
+    
+    with open(image_path, "rb") as image_file:
+        response = openai.ChatCompletion.create(
+            model="gpt-4-vision-preview",
+            messages=[
+                {"role": "system", "content": "You are an assistant that describes fashion products based on images."},
+                {"role": "user", "content": "Describe this fashion product in a concise, professional way."}
+            ],
+            files=[("image", image_file)]
+        )
+    return response["choices"][0]["message"]["content"]
 
 def update_b2c_tags(df):
     tag_translations = {
@@ -18,36 +37,12 @@ def update_b2c_tags(df):
         "_tag_grs": ["_tag_grs"]
     }
 
-    for index, row in df.iterrows():
-        tags = set(str(row["B2C Tags"]).split(",")) if pd.notna(row["B2C Tags"]) else set()
-        
-        # Tilføj materiale-tags
-        quality = str(row["Quality"]).lower()
-        if "ecovero" in quality:
-            tags.add("ecovero")
-        if "gots" in quality:
-            tags.add("gots")
-            tags.add("_tag_gots")
-        if "grs" in quality:
-            tags.add("_tag_grs")
+    df["B2C Tags"] = df["B2C Tags"].fillna("")
 
-        # Tilføj Style Name-tag (første ord uden "SR")
-        style_name = str(row["Style Name"]).strip()
-        first_word = style_name.split()[0].replace("SR", "").strip()
-        tags.add(first_word)
+    for key, values in tag_translations.items():
+        df.loc[df["Style Name"].str.contains(key, case=False, na=False), "B2C Tags"] += "," + ",".join(values)
 
-        # Tilføj kategori-tags baseret på produktnavnet
-        for key, values in tag_translations.items():
-            if key in style_name.lower() or key in first_word.lower():
-                tags.update(values)
-
-        # Sikrer minimum 6 tags
-        while len(tags) < 6:
-            tags.add("fashion")  # Generisk tag som backup
-
-        # Opdater kolonnen
-        df.at[index, "B2C Tags"] = ",".join(tags)
-
+    df["B2C Tags"] = df["B2C Tags"].apply(lambda x: ",".join(set(x.split(","))) if x else x)
     return df
 
 def process_excel_and_zip(excel_file, zip_file):
@@ -55,27 +50,31 @@ def process_excel_and_zip(excel_file, zip_file):
     xls = pd.ExcelFile(excel_file)
     df = pd.read_excel(xls, sheet_name=xls.sheet_names[0])
     
-    # Ekstraher billeder fra ZIP-filen
-    with zipfile.ZipFile(zip_file, 'r') as zip_ref:
-        image_files = zip_ref.namelist()
-    
-    # Find style-numre fra billedfiler
-    style_numbers = {file[:10] for file in image_files if file.startswith("SR")}
-    
-    # Opdater description baseret på billeder
-    for index, row in df.iterrows():
-        if pd.isna(row["Description"]) and row["Style No."] in style_numbers:
-            df.at[index, "Description"] = f"Product description for {row['Style Name']} is generated."
+    # Udpak ZIP-filen midlertidigt
+    with tempfile.TemporaryDirectory() as temp_dir:
+        with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+            zip_ref.extractall(temp_dir)
+            image_files = {file for file in os.listdir(temp_dir) if file.endswith((".jpg", ".png", ".jpeg"))}
+        
+        # Find style-numre fra billedfiler
+        style_numbers = {file[:10] for file in image_files if file.startswith("SR")}
+        
+        # Opdater description baseret på AI-analyse af billeder
+        for index, row in df.iterrows():
+            style_no = row["Style No."]
+            if pd.isna(row["Description"]) and style_no in style_numbers:
+                image_path = os.path.join(temp_dir, next(f for f in image_files if f.startswith(style_no)))
+                df.at[index, "Description"] = analyze_image_with_openai(image_path)
     
     # Opdater B2C Tags
     df = update_b2c_tags(df)
     
-    # Gem den opdaterede fil
-    output = BytesIO()
-    with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
-        df.to_excel(writer, index=False, sheet_name='Updated Data')
-    output.seek(0)
-    return output
+    # Gem den opdaterede fil som en midlertidig fil
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        df.to_excel(tmp.name, index=False, sheet_name='Updated Data')
+        tmp_path = tmp.name
+    
+    return tmp_path
 
 # Streamlit UI
 st.title("Product Data Processor")
@@ -85,5 +84,6 @@ zip_file = st.file_uploader("Upload ZIP File with Images", type=["zip"])
 
 if excel_file and zip_file:
     st.success("Files uploaded successfully. Processing...")
-    processed_file = process_excel_and_zip(excel_file, zip_file)
-    st.download_button("Download Processed Excel File", processed_file, "processed_data.xlsx")
+    processed_file_path = process_excel_and_zip(excel_file, zip_file)
+    with open(processed_file_path, "rb") as file:
+        st.download_button("Download Processed Excel File", file, "processed_data.xlsx")

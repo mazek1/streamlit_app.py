@@ -4,6 +4,7 @@ import zipfile
 import os
 import tempfile
 import openai
+import json
 from io import BytesIO
 from PIL import Image
 
@@ -22,27 +23,19 @@ def analyze_image_with_openai(image_path):
         )
     return response["choices"][0]["message"]["content"]
 
-def update_b2c_tags(df):
-    tag_translations = {
-        "shirt": ["shirt", "shirts", "skjorte", "skjorter", "hemd", "hemden"],
-        "blouse": ["blouse", "blouses", "blus", "blusar", "bluse", "blusen"],
-        "dress": ["dress", "dresses", "klänning", "klänningar", "kleid", "kleider"],
-        "pants": ["pants", "trousers", "byxor", "hose"],
-        "skirt": ["skirt", "skirts", "kjol", "kjolar", "rock", "röcke"],
-        "jacket": ["jacket", "jackets", "jacka", "jackor", "jacke", "jacken"],
-        "blazer": ["blazer", "blazers", "kavaj", "kavajer", "sakko", "sakkos"],
-        "ecovero": ["ecovero"],
-        "gots": ["gots", "_tag_gots"],
-        "_tag_grs": ["_tag_grs"]
-    }
+def load_cache():
+    """Indlæser cache-filen hvis den findes."""
+    CACHE_FILE = "description_cache.json"
+    if os.path.exists(CACHE_FILE):
+        with open(CACHE_FILE, "r") as file:
+            return json.load(file)
+    return {}
 
-    df["B2C Tags"] = df["B2C Tags"].fillna("")
-
-    for key, values in tag_translations.items():
-        df.loc[df["Style Name"].str.contains(key, case=False, na=False), "B2C Tags"] += "," + ",".join(values)
-
-    df["B2C Tags"] = df["B2C Tags"].apply(lambda x: ",".join(set(x.split(","))) if x else x)
-    return df
+def save_cache(cache):
+    """Gemmer cache-filen."""
+    CACHE_FILE = "description_cache.json"
+    with open(CACHE_FILE, "w") as file:
+        json.dump(cache, file)
 
 def process_excel_and_zip(excel_file, zip_file):
     # Indlæs Excel-fil
@@ -58,12 +51,31 @@ def process_excel_and_zip(excel_file, zip_file):
         # Find style-numre fra billedfiler
         style_numbers = {file[:10] for file in image_files if file.startswith("SR")}
         
+        # Indlæs cache
+        cache = load_cache()
+        
+        # Progress bar
+        progress_bar = st.progress(0)
+        total_images = len(style_numbers)
+        processed_images = 0
+        
         # Opdater description baseret på AI-analyse af billeder
         for index, row in df.iterrows():
             style_no = row["Style No."]
             if pd.isna(row["Description"]) and style_no in style_numbers:
-                image_path = os.path.join(temp_dir, next(f for f in image_files if f.startswith(style_no)))
-                df.at[index, "Description"] = analyze_image_with_openai(image_path)
+                if style_no in cache:
+                    df.at[index, "Description"] = cache[style_no]
+                else:
+                    image_path = os.path.join(temp_dir, next(f for f in image_files if f.startswith(style_no)))
+                    description = analyze_image_with_openai(image_path)
+                    df.at[index, "Description"] = description
+                    cache[style_no] = description  # Gem i cache
+                
+                processed_images += 1
+                progress_bar.progress(processed_images / total_images)
+        
+        # Gem cache efter behandling
+        save_cache(cache)
     
     # Opdater B2C Tags
     df = update_b2c_tags(df)

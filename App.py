@@ -151,7 +151,11 @@ if excel_file and zip_file:
     
     descriptions = []
     for idx, row in df.iterrows():
-        style_text = str(row[style_column])
+        # Konverter værdien til streng og trim eventuelle mellemrum
+        style_text = str(row[style_column]).strip()
+        # Fjern evt. ".0" hvis det er et tal konverteret til streng
+        if style_text.endswith('.0'):
+            style_text = style_text[:-2]
         # Matcher eksempelvis "SR123456", "SR123-456" eller "SR 123 456"
         match = re.search(r"(?:SR\s*)?(\d{3})[-\s]?(\d{3})", style_text, re.IGNORECASE)
         if match:
@@ -182,5 +186,6 @@ if excel_file and zip_file:
     # Én samlet download-knap
     with open(final_file_path, "rb") as file:
         st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
+
 
 

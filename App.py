@@ -47,7 +47,7 @@ def save_cache(cache):
         json.dump(cache, file)
 
 def update_b2c_tags(df):
-    """Opdaterer B2C Tags baseret på Style Name og Quality"""
+    """Genskaber B2C Tags præcis som de fungerede korrekt før."""
     tag_translations = {
         "shirt": ["shirt", "shirts", "skjorte", "skjorter", "hemd", "hemden"],
         "blouse": ["blouse", "blouses", "blus", "blusar", "bluse", "blusen"],
@@ -75,13 +75,6 @@ def update_b2c_tags(df):
         df.loc[mask, "B2C Tags"] = df.loc[mask, "B2C Tags"].apply(
             lambda x: ",".join(set(x.split(",") + values)).strip(",")
         )
-    
-    # Tilføj materialekvaliteten som et tag uden procentdelen og fjern TM, () og bindestreger
-    df["Quality Tags"] = df["Quality"].str.replace(r"\d+%", "", regex=True).str.replace(r"[™()\-]", "", regex=True).str.strip()
-    df["Quality Tags"] = df["Quality Tags"].apply(lambda x: ",".join(set(x.split())))
-    df["B2C Tags"] = df.apply(lambda row: ",".join(set([row["B2C Tags"], row["Quality Tags"]])) if row["Quality Tags"] else row["B2C Tags"], axis=1)
-    df["B2C Tags"] = df["B2C Tags"].str.strip(",")
-    df.drop(columns=["Quality Tags"], inplace=True)
     
     return df
 

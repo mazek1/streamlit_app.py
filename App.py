@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import zipfiles
+import zipfile
 import os
 import tempfile
 import openai

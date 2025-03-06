@@ -206,7 +206,7 @@ def extract_images_from_zip(zip_file):
                     image_mapping[style_no] = tmp_file.name
     return image_mapping
 
-if excel_file and zip_file:
+if excel_file and zip_files:
     # Indlæs den allerede behandlede Excel-fil
     df = pd.read_excel(processed_file_path)
     

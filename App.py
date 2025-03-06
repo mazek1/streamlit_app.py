@@ -46,49 +46,47 @@ def save_cache(cache):
     with open(CACHE_FILE, "w") as file:
         json.dump(cache, file)
 
-def update_b2c_tags(df):
-    """Opdaterer B2C Tags baseret på Style Name og Quality"""
-    tag_translations = {
-        "shirt": ["shirt", "shirts", "skjorte", "skjorter", "hemd", "hemden"],
-        "blouse": ["blouse", "blouses", "blus", "blusar", "bluse", "blusen"],
-        "dress": ["dress", "dresses", "klänning", "klänningar", "kleid", "kleider"],
-        "pants": ["pants", "trousers", "byxor", "hose"],
-        "skirt": ["skirt", "skirts", "kjol", "kjolar", "rock", "röcke"],
-        "jacket": ["jacket", "jackets", "jacka", "jackor", "jacke", "jacken"],
-        "blazer": ["blazer", "blazers", "kavaj", "kavajer", "sakko", "sakkos"],
-        "knit": ["knit", "knitwear", "strik", "stickat", "gestrickt"],
-        "rollneck": ["rollneck", "roll neck", "rullekrave", "polo krage", "rollkragen", "polokragen"],
-        "cardigan": ["cardigan", "cardigans", "cardigan", "kofta", "strickjacke", "strickjacken"],
-        "o-neck": ["o-neck", "o neck", "rund hals", "rundhals", "runda halsen"],
-        "v-neck": ["v-neck", "v neck", "v-hals", "v-halsausschnitt"],
-        "ecovero": ["ecovero"],
-        "gots": ["gots", "_tag_gots"],
-        "_tag_grs": ["_tag_grs"],
-        "tencel": ["tencel"],
-        "lenzing": ["lenzing", "ecovero"]
-    }
-
-    df["B2C Tags"] = df["B2C Tags"].fillna("").astype(str)
-
-    for key, values in tag_translations.items():
-        mask = df["Style Name"].str.contains(key, case=False, na=False)
-        df.loc[mask, "B2C Tags"] = df.loc[mask, "B2C Tags"].apply(
-            lambda x: ",".join(set(x.split(",") + values)).strip(",")
-        )
-    
-    # Tilføj materialekvaliteten som et tag uden procentdelen og fjern TM, () og bindestreger
-    df["Quality Tags"] = df["Quality"].str.replace(r"\d+%", "", regex=True).str.replace(r"[™()\-]", "", regex=True).str.strip()
-    df["Quality Tags"] = df["Quality Tags"].apply(lambda x: ",".join(set(x.split())))
-    df["B2C Tags"] = df.apply(lambda row: ",".join(set([row["B2C Tags"], row["Quality Tags"]])) if row["Quality Tags"] else row["B2C Tags"], axis=1)
-    df["B2C Tags"] = df["B2C Tags"].str.strip(",")
-    df.drop(columns=["Quality Tags"], inplace=True)
-    
-    return df
-
 def process_excel_and_zip(excel_file, zip_file):
     # Indlæs Excel-fil
     xls = pd.ExcelFile(excel_file)
     df = pd.read_excel(xls, sheet_name=xls.sheet_names[0])
+    
+    # Udpak ZIP-filen midlertidigt
+    with tempfile.TemporaryDirectory() as temp_dir:
+        with zipfile.ZipFile(zip_file, 'r') as zip_ref:
+            zip_ref.extractall(temp_dir)
+            image_files = {file for file in os.listdir(temp_dir) if file.endswith((".jpg", ".png", "jpeg"))}
+        
+        # Find style-numre fra billedfiler
+        style_numbers = {file[:10] for file in image_files if file.startswith("SR")}
+        
+        # Indlæs cache
+        cache = load_cache()
+        
+        # Progress bar
+        progress_bar = st.progress(0)
+        total_images = len(style_numbers) if style_numbers else 1
+        processed_images = 0
+        
+        # Opdater description baseret på AI-analyse af billeder
+        for index, row in df.iterrows():
+            style_no = str(row["Style No."]).strip() if not pd.isna(row["Style No."]) else ""
+            if style_no and style_no in style_numbers:
+                image_path = os.path.join(temp_dir, next((f for f in image_files if f.startswith(style_no)), None))
+                
+                if image_path:
+                    if style_no in cache:
+                        description = cache[style_no]
+                    else:
+                        description = analyze_image_with_openai(image_path)
+                        cache[style_no] = description  # Gem i cache
+                    
+                    df.at[index, "Description"] = description  # Opdater Excel-data
+                    processed_images += 1
+                    progress_bar.progress(processed_images / total_images)
+        
+        # Gem cache efter behandling
+        save_cache(cache)
     
     # Opdater B2C Tags
     df = update_b2c_tags(df)

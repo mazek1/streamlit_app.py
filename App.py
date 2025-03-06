@@ -123,37 +123,41 @@ def parse_style_number(raw_str: str) -> str or None:
       - "SR425-706"         -> "SR425-706"
       - "SR425706"          -> "SR425-706"
       - "SR425-706_103_1"    -> "SR425-706"
-    Metoden:
-      1. Splitter på underscore og beholder den første del.
-      2. Fjerner mellemrum.
-      3. Søger efter et match på enten "SR\d{3}-\d{3}" eller "SR\d{6}".
     """
     if not raw_str:
         return None
-    s = str(raw_str)
-    s = s.split("_")[0]         # Ignorer alt efter underscore
-    s = s.replace(" ", "")        # Fjern mellemrum
-    matches = re.findall(r"(SR\d{3}-\d{3}|SR\d{6})", s, re.IGNORECASE)
-    if matches:
-        candidate = matches[0].upper()
-        if "-" in candidate:
-            return candidate
-        else:
-            # Hvis candidate f.eks. er "SR425706", indsæt bindestreg til "SR425-706"
-            return candidate[:5] + "-" + candidate[5:]
+    s = str(raw_str).upper().strip()
+    # Hvis der er en underscore, behold kun den del før den.
+    if "_" in s:
+        s = s.split("_", 1)[0]
+    # Først forsøg: Find et match med bindestreg.
+    m = re.search(r"(SR\d{3}-\d{3})", s)
+    if m:
+        return m.group(1)
+    # Andet forsøg: Find et match uden bindestreg (6 cifre efter "SR")
+    m = re.search(r"(SR\d{6})", s)
+    if m:
+        candidate = m.group(1)
+        return candidate[:5] + "-" + candidate[5:]
     return None
 
 def extract_images_from_zip(zip_file):
     """
     Udtrækker billeder fra ZIP-filen og returnerer et dictionary,
     der mapper et stylenummer (i formatet "SRxxx-xxx") til en midlertidig filsti.
+    Her nulstilles filens position, og billedfilnavnet splittes ved den første underscore.
     """
     image_mapping = {}
+    # Sørg for at starte fra begyndelsen
+    zip_file.seek(0)
     with zipfile.ZipFile(zip_file) as z:
         for file_name in z.namelist():
             if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
                 base_name = os.path.basename(file_name)
                 base_no_ext = os.path.splitext(base_name)[0]
+                # Tag kun den del før den første underscore
+                if "_" in base_no_ext:
+                    base_no_ext = base_no_ext.split("_", 1)[0]
                 style_no = parse_style_number(base_no_ext)
                 if style_no:
                     data = z.read(file_name)
@@ -171,18 +175,13 @@ if excel_file and zip_file:
     image_mapping = extract_images_from_zip(zip_file)
     
     # Brug "Style Number" hvis den findes, ellers "Style Name"
-    if "Style Number" in df.columns:
-        style_column = "Style Number"
-    elif "Style Name" in df.columns:
-        style_column = "Style Name"
-    else:
-        style_column = df.columns[0]
+    style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
     
     cache = load_cache()
     descriptions = []
     
     for _, row in df.iterrows():
-        raw_style = str(row[style_column])
+        raw_style = str(row[style_column]).strip()
         style_no = parse_style_number(raw_style)
         if style_no is None:
             descriptions.append("No valid style number found.")

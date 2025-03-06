@@ -116,76 +116,97 @@ import zipfile
 import tempfile
 import os
 
+def parse_style_number(raw_str: str) -> str or None:
+    """
+    Forsøger at normalisere en streng til formatet 'SRxxx-xxx'.
+    Eksempler på gyldige input:
+      - 'SR425706'
+      - 'SR425-706'
+      - 'SR 425 706'
+      - 'sr425706'
+    Returnerer 'SR425-706' eller None, hvis den ikke kan matche.
+    """
+    if not raw_str:
+        return None
+    
+    # Fjern mellemrum, understregninger og gør alt stort
+    s = raw_str.upper().replace(" ", "").replace("_", "")
+    
+    # Matcher fx 'SR425706' eller 'SR425-706' (evt. uden SR)
+    match = re.match(r"^(?:SR)?(\d{3})-?(\d{3})$", s)
+    if match:
+        return f"SR{match.group(1)}-{match.group(2)}"
+    return None
+
 def extract_images_from_zip(zip_file):
     """
-    Udtrækker billeder fra den uploadede ZIP-fil og returnerer et dictionary,
-    der mapper et style number (f.eks. "SR123-456") til stien for en midlertidigt gemt billedfil.
+    Udtrækker billeder fra ZIP-filen og returnerer et dict,
+    der mapper style_no i formatet 'SRxxx-xxx' til en midlertidig filsti.
     """
     image_mapping = {}
     with zipfile.ZipFile(zip_file) as z:
         for file_name in z.namelist():
+            # Tjek filtype
             if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                # Matcher eksempelvis "SR123456", "SR123-456" eller "SR 123 456"
-                match = re.search(r"(?:SR\s*)?(\d{3})[-\s]?(\d{3})", file_name, re.IGNORECASE)
-                if match:
-                    style_no = f"SR{match.group(1)}-{match.group(2)}"
+                # Tag kun selve filnavnet (uden sti inde i zip)
+                base_name = os.path.basename(file_name)
+                style_no = parse_style_number(os.path.splitext(base_name)[0])
+                if style_no:
                     data = z.read(file_name)
-                    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_name)[1])
+                    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(base_name)[1])
                     tmp_file.write(data)
                     tmp_file.close()
                     image_mapping[style_no] = tmp_file.name
     return image_mapping
 
 if excel_file and zip_file:
-    # Indlæs den allerede behandlede Excel-fil med opdaterede B2C Tags
+    # Indlæs den allerede behandlede Excel-fil
     df = pd.read_excel(processed_file_path)
-    
+
     # Opret mapping fra billedfiler i ZIP-filen
     image_mapping = extract_images_from_zip(zip_file)
-    
-    # Vælg den kolonne, der skal bruges til style numbers: "Style Number" hvis den findes, ellers "Style Name"
+
+    # Vælg den kolonne, der skal bruges til stylenumre
     style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
-    
+
     # Indlæs cache for beskrivelser
     cache = load_cache()
-    
+
     descriptions = []
-    for idx, row in df.iterrows():
-        # Konverter værdien til streng og trim eventuelle mellemrum
-        style_text = str(row[style_column]).strip()
-        # Fjern evt. ".0" hvis det er et tal konverteret til streng
-        if style_text.endswith('.0'):
-            style_text = style_text[:-2]
-        # Matcher eksempelvis "SR123456", "SR123-456" eller "SR 123 456"
-        match = re.search(r"(?:SR\s*)?(\d{3})[-\s]?(\d{3})", style_text, re.IGNORECASE)
-        if match:
-            style_no = f"SR{match.group(1)}-{match.group(2)}"
-            if style_no in cache:
-                desc = cache[style_no]
-            elif style_no in image_mapping:
-                image_path = image_mapping[style_no]
-                desc = analyze_image_with_openai(image_path)
-                cache[style_no] = desc
-            else:
-                desc = f"No matching image found for style {style_no}"
+    for _, row in df.iterrows():
+        raw_style = str(row[style_column]).strip()
+        style_no = parse_style_number(raw_style)
+
+        if style_no is None:
+            # Kunne ikke parse stylenummeret
+            descriptions.append("No valid style number found.")
+            continue
+
+        # Hvis stylenummeret fandtes i cachen, brug det
+        if style_no in cache:
+            descriptions.append(cache[style_no])
+            continue
+
+        # Hvis vi har et billede til stylenummeret, generer beskrivelsen
+        if style_no in image_mapping:
+            image_path = image_mapping[style_no]
+            desc = analyze_image_with_openai(image_path)
+            cache[style_no] = desc
+            descriptions.append(desc)
         else:
-            desc = "No valid style number found."
-        descriptions.append(desc)
-    
+            descriptions.append(f"No matching image found for style {style_no}")
+
     # Tilføj beskrivelserne som en ny kolonne i DataFrame
     df["Description"] = descriptions
-    
-    # Gem den opdaterede fil med beskrivelser til en midlertidig fil
+
+    # Gem den opdaterede fil med beskrivelser
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         df.to_excel(tmp.name, index=False, sheet_name='Updated Data with Descriptions')
         final_file_path = tmp.name
-    
-    # Gem cache for fremtidige kørsler
+
+    # Gem cache
     save_cache(cache)
-    
-    # Én samlet download-knap
+
+    # Én download-knap
     with open(final_file_path, "rb") as file:
-        st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
-
-
-
+        st.download_button("Download Final Excel File", file, "

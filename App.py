@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import zipfile
+import zipfiles
 import os
 import tempfile
 import openai
@@ -85,7 +85,7 @@ def update_b2c_tags(df):
     
     return df
 
-def process_excel_and_zip(excel_file, zip_files):
+def process_excel_and_zips(excel_file, zip_files):
     # Indlæs Excel-fil
     xls = pd.ExcelFile(excel_file)
     df = pd.read_excel(xls, sheet_name=xls.sheet_names[0])

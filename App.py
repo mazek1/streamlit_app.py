@@ -104,20 +104,20 @@ def process_excel_and_zip(excel_file, zip_file):
 # Streamlit UI
 st.title("Product Data Processor")
 
-# Ændr uploaderen for billeder, så den accepterer flere ZIP-filer
+# Ændr uploaderen for billeder, så den accepterer excel flere ZIP-filer
 excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
-zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True)
 
-# Nu opdaterer vi den ekstra kode, så den understøtter flere ZIP-filer:
+# Opret uploader for ZIP-filer med en unik key:
+zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
+
 if excel_file and zip_files:
     df = pd.read_excel(processed_file_path)
-
+    
     combined_image_mapping = {}
     for zip_file in zip_files:
         mapping = extract_images_from_zip(zip_file)
         combined_image_mapping.update(mapping)
     
-    # Vælg den kolonne, der skal bruges til stylenumre (fortrinsvis "Style Number", ellers "Style Name")
     style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
     
     cache = load_cache()
@@ -149,10 +149,6 @@ if excel_file and zip_files:
     
     with open(final_file_path, "rb") as file:
         st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
-
-if excel_file and zip_files:
-    st.success("Files uploaded successfully. Processing...")
-    processed_file_path = process_excel_and_zip(excel_file, zip_file)
 
 import re
 import zipfile

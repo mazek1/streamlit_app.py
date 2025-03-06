@@ -124,15 +124,15 @@ def parse_style_number(raw_str: str) -> str or None:
       - 'SR425-706'
       - 'SR 425 706'
       - 'sr425706'
-    Returnerer 'SR425-706' eller None, hvis den ikke kan matche.
+    Returnerer 'SR425-706' eller None, hvis der ikke findes et match.
     """
     if not raw_str:
         return None
-    
-    # Fjern mellemrum, understregninger og gør alt stort
-    s = raw_str.upper().replace(" ", "").replace("_", "")
-    
-    # Matcher fx 'SR425706' eller 'SR425-706' (evt. uden SR)
+    s = raw_str.upper().strip()
+    # Fjern mellemrum og understregninger
+    s = s.replace(" ", "").replace("_", "")
+    # Normaliser eventuelle specielle bindestreger til standardbindestreg
+    s = s.replace("–", "-").replace("—", "-")
     match = re.match(r"^(?:SR)?(\d{3})-?(\d{3})$", s)
     if match:
         return f"SR{match.group(1)}-{match.group(2)}"
@@ -140,21 +140,18 @@ def parse_style_number(raw_str: str) -> str or None:
 
 def extract_images_from_zip(zip_file):
     """
-    Udtrækker billeder fra ZIP-filen og returnerer et dict,
-    der mapper style_no i formatet 'SRxxx-xxx' til en midlertidig filsti.
+    Udtrækker billeder fra ZIP-filen og returnerer et dictionary,
+    der mapper et stylenummer (format: 'SRxxx-xxx') til en midlertidigt gemt filsti.
     Alt efter den første underscore ignoreres.
     """
     image_mapping = {}
     with zipfile.ZipFile(zip_file) as z:
         for file_name in z.namelist():
-            # Kun billedfiler
             if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
                 base_name = os.path.basename(file_name)
-                # Fjern filtype
+                # Fjern filtypen og tag kun den del før den første underscore
                 base_name_no_ext = os.path.splitext(base_name)[0]
-                # Tag kun den del før første underscore
                 base_name_no_ext = base_name_no_ext.split("_", 1)[0]
-                
                 style_no = parse_style_number(base_name_no_ext)
                 if style_no:
                     data = z.read(file_name)
@@ -167,52 +164,48 @@ def extract_images_from_zip(zip_file):
 if excel_file and zip_file:
     # Indlæs den allerede behandlede Excel-fil
     df = pd.read_excel(processed_file_path)
-
-    # Opret mapping fra billedfiler i ZIP-filen
-    image_mapping = extract_images_from_zip(zip_file)
-
-    # Vælg den kolonne, der skal bruges til stylenumre
-    style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
-
-    # Indlæs cache for beskrivelser
+    
+    # Robust kolonneudvælgelse: prøv "Style Number", herefter "Style Name", ellers en kolonne med "SR"
+    if "Style Number" in df.columns:
+        style_column = "Style Number"
+    elif "Style Name" in df.columns:
+        style_column = "Style Name"
+    else:
+        style_column = None
+        for col in df.columns:
+            if df[col].astype(str).str.contains("SR", case=False, na=False).any():
+                style_column = col
+                break
+        if not style_column:
+            style_column = df.columns[0]  # fallback hvis intet findes
+    
     cache = load_cache()
-
+    image_mapping = extract_images_from_zip(zip_file)
+    
     descriptions = []
     for _, row in df.iterrows():
         raw_style = str(row[style_column]).strip()
-        # Forsøg at parse stylenummeret til formatet 'SRxxx-xxx'
         style_no = parse_style_number(raw_style)
         if style_no is None:
-            # Kunne ikke parse stylenummeret
             descriptions.append("No valid style number found.")
             continue
-
-        # Hvis stylenummeret allerede er i cachen
         if style_no in cache:
             descriptions.append(cache[style_no])
-            continue
-
-        # Hvis vi har et billede til stylenummeret
-        if style_no in image_mapping:
+        elif style_no in image_mapping:
             image_path = image_mapping[style_no]
             desc = analyze_image_with_openai(image_path)
             cache[style_no] = desc
             descriptions.append(desc)
         else:
             descriptions.append(f"No matching image found for style {style_no}")
-
-    # Tilføj beskrivelserne som en ny kolonne i DataFrame
+    
     df["Description"] = descriptions
-
-    # Gem den opdaterede fil med beskrivelser
+    
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         df.to_excel(tmp.name, index=False, sheet_name='Updated Data with Descriptions')
         final_file_path = tmp.name
-
-    # Gem cache
+    
     save_cache(cache)
-
-    # Én download-knap (ingen linjeskift i strengen -> ingen syntax error)
+    
     with open(final_file_path, "rb") as file:
         st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
-

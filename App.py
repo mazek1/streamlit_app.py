@@ -112,3 +112,69 @@ if excel_file and zip_file:
     processed_file_path = process_excel_and_zip(excel_file, zip_file)
     with open(processed_file_path, "rb") as file:
         st.download_button("Download Processed Excel File", file, "processed_data.xlsx")
+
+import re
+
+def extract_images_from_zip(zip_file):
+    """
+    Udtrækker billeder fra den uploadede ZIP-fil og returnerer et dictionary,
+    der mapper et style number (f.eks. "SR123-456") til stien for en midlertidigt gemt billedfil.
+    """
+    image_mapping = {}
+    with zipfile.ZipFile(zip_file) as z:
+        for file_name in z.namelist():
+            if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
+                match = re.search(r"(SR\d{3}-\d{3})", file_name)
+                if match:
+                    style_no = match.group(1)
+                    data = z.read(file_name)
+                    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_name)[1])
+                    tmp_file.write(data)
+                    tmp_file.close()
+                    image_mapping[style_no] = tmp_file.name
+    return image_mapping
+
+if excel_file and zip_file:
+    # Genindlæs den allerede behandlede Excel-fil med opdaterede B2C Tags
+    df = pd.read_excel(processed_file_path)
+    
+    # Opret mapping fra style number til billedfilsti via ZIP-filen
+    image_mapping = extract_images_from_zip(zip_file)
+    
+    # Indlæs cache for beskrivelser
+    cache = load_cache()
+    
+    # Bestem hvilken kolonne der skal bruges til style numbers
+    style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
+    
+    descriptions = []
+    for idx, row in df.iterrows():
+        style_text = str(row[style_column])
+        match = re.search(r"(SR\d{3}-\d{3})", style_text)
+        if match:
+            style_no = match.group(1)
+            if style_no in cache:
+                desc = cache[style_no]
+            elif style_no in image_mapping:
+                image_path = image_mapping[style_no]
+                desc = analyze_image_with_openai(image_path)
+                cache[style_no] = desc
+            else:
+                desc = f"No matching image found for style {style_no}"
+        else:
+            desc = "No valid style number found."
+        descriptions.append(desc)
+    
+    # Tilføj beskrivelserne som en ny kolonne i DataFrame
+    df["Description"] = descriptions
+
+    # Gem den opdaterede fil med beskrivelser til en midlertidig fil
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        df.to_excel(tmp.name, index=False, sheet_name='Updated Data with Descriptions')
+        desc_file_path = tmp.name
+
+    # Gem cache for at genbruge beskrivelser ved eventuelle fremtidige kørsel
+    save_cache(cache)
+    st.success("Descriptions added to products!")
+    with open(desc_file_path, "rb") as file:
+        st.download_button("Download Excel with Descriptions", file, "processed_data_with_descriptions.xlsx")

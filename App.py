@@ -122,8 +122,8 @@ def extract_images_from_zip(zip_file):
     with zipfile.ZipFile(zip_file) as z:
         for file_name in z.namelist():
             if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                # Matcher både "SR123456" og "SR123-456", konverteres til standardformat "SR123-456"
-                match = re.search(r"SR(\d{3})-?(\d{3})", file_name, re.IGNORECASE)
+                # Matcher f.eks. "SR123456", "123456", "SR123-456", "SR 123 456" osv.
+                match = re.search(r"(?:SR\s*)?(\d{3})[-\s]?(\d{3})", file_name, re.IGNORECASE)
                 if match:
                     style_no = f"SR{match.group(1)}-{match.group(2)}"
                     data = z.read(file_name)
@@ -140,17 +140,20 @@ if excel_file and zip_file:
     # Opret mapping fra style number til billedfilsti via ZIP-filen
     image_mapping = extract_images_from_zip(zip_file)
     
-    # Indlæs cache for beskrivelser
-    cache = load_cache()
-    
     # Bestem hvilken kolonne der skal bruges til style numbers
     style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
+    
+    # Debug: Udskriv unikke værdier fra den valgte kolonne for at se, hvad der indgår
+    st.write("Unikke værdier i style kolonnen:", df[style_column].unique())
+    
+    # Indlæs cache for beskrivelser
+    cache = load_cache()
     
     descriptions = []
     for idx, row in df.iterrows():
         style_text = str(row[style_column])
-        # Matcher både "SR123456" og "SR123-456"
-        match = re.search(r"SR(\d{3})-?(\d{3})", style_text, re.IGNORECASE)
+        # Matcher f.eks. "SR123456", "123456", "SR123-456", "SR 123 456" osv.
+        match = re.search(r"(?:SR\s*)?(\d{3})[-\s]?(\d{3})", style_text, re.IGNORECASE)
         if match:
             style_no = f"SR{match.group(1)}-{match.group(2)}"
             if style_no in cache:
@@ -179,4 +182,3 @@ if excel_file and zip_file:
     # Samlet download-knap (brug kun denne!)
     with open(desc_file_path, "rb") as file:
         st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
-

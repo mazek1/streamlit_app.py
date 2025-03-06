@@ -105,9 +105,53 @@ def process_excel_and_zip(excel_file, zip_file):
 st.title("Product Data Processor")
 
 excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
-zip_file = st.file_uploader("Upload ZIP File with Images", type=["zip"])
+# Ændr uploaderen for billeder, så den accepterer flere ZIP-filer
+excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True)
 
-if excel_file and zip_file:
+# Nu opdaterer vi den ekstra kode, så den understøtter flere ZIP-filer:
+if excel_file and zip_files:
+    df = pd.read_excel(processed_file_path)
+
+    combined_image_mapping = {}
+    for zip_file in zip_files:
+        mapping = extract_images_from_zip(zip_file)
+        combined_image_mapping.update(mapping)
+    
+    # Vælg den kolonne, der skal bruges til stylenumre (fortrinsvis "Style Number", ellers "Style Name")
+    style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
+    
+    cache = load_cache()
+    descriptions = []
+    
+    for _, row in df.iterrows():
+        raw_style = str(row[style_column]).strip()
+        style_no = parse_style_number(raw_style)
+        if style_no is None:
+            descriptions.append("No valid style number found.")
+            continue
+        if style_no in cache:
+            descriptions.append(cache[style_no])
+        elif style_no in combined_image_mapping:
+            image_path = combined_image_mapping[style_no]
+            desc = analyze_image_with_openai(image_path)
+            cache[style_no] = desc
+            descriptions.append(desc)
+        else:
+            descriptions.append(f"No matching image found for style {style_no}")
+    
+    df["Description"] = descriptions
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        df.to_excel(tmp.name, index=False, sheet_name='Updated Data with Descriptions')
+        final_file_path = tmp.name
+    
+    save_cache(cache)
+    
+    with open(final_file_path, "rb") as file:
+        st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
+
+if excel_file and zip_files:
     st.success("Files uploaded successfully. Processing...")
     processed_file_path = process_excel_and_zip(excel_file, zip_file)
 

@@ -106,7 +106,6 @@ st.title("Product Data Processor")
 
 excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 zip_file = st.file_uploader("Upload ZIP File with Images", type=["zip"])
-zip_file = st.file_uploader("Upload ZIP File with Images", type=["zip"])
 
 if excel_file and zip_file:
     st.success("Files uploaded successfully. Processing...")

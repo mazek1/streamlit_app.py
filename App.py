@@ -142,15 +142,20 @@ def extract_images_from_zip(zip_file):
     """
     Udtrækker billeder fra ZIP-filen og returnerer et dict,
     der mapper style_no i formatet 'SRxxx-xxx' til en midlertidig filsti.
+    Alt efter den første underscore ignoreres.
     """
     image_mapping = {}
     with zipfile.ZipFile(zip_file) as z:
         for file_name in z.namelist():
-            # Tjek filtype
+            # Kun billedfiler
             if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                # Tag kun selve filnavnet (uden sti inde i zip)
                 base_name = os.path.basename(file_name)
-                style_no = parse_style_number(os.path.splitext(base_name)[0])
+                # Fjern filtype
+                base_name_no_ext = os.path.splitext(base_name)[0]
+                # Tag kun den del før første underscore
+                base_name_no_ext = base_name_no_ext.split("_", 1)[0]
+                
+                style_no = parse_style_number(base_name_no_ext)
                 if style_no:
                     data = z.read(file_name)
                     tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(base_name)[1])
@@ -175,19 +180,19 @@ if excel_file and zip_file:
     descriptions = []
     for _, row in df.iterrows():
         raw_style = str(row[style_column]).strip()
+        # Forsøg at parse stylenummeret til formatet 'SRxxx-xxx'
         style_no = parse_style_number(raw_style)
-
         if style_no is None:
             # Kunne ikke parse stylenummeret
             descriptions.append("No valid style number found.")
             continue
 
-        # Hvis stylenummeret fandtes i cachen, brug det
+        # Hvis stylenummeret allerede er i cachen
         if style_no in cache:
             descriptions.append(cache[style_no])
             continue
 
-        # Hvis vi har et billede til stylenummeret, generer beskrivelsen
+        # Hvis vi har et billede til stylenummeret
         if style_no in image_mapping:
             image_path = image_mapping[style_no]
             desc = analyze_image_with_openai(image_path)
@@ -207,6 +212,7 @@ if excel_file and zip_file:
     # Gem cache
     save_cache(cache)
 
-    # Én download-knap
+    # Én download-knap (ingen linjeskift i strengen -> ingen syntax error)
     with open(final_file_path, "rb") as file:
-        st.download_button("Download Final Excel File", file, "
+        st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
+

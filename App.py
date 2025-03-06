@@ -140,7 +140,7 @@ if excel_file and zip_file:
     # Opret mapping fra style number til billedfilsti via ZIP-filen
     image_mapping = extract_images_from_zip(zip_file)
     
-    # Bestem hvilken kolonne der skal bruges til style numbers
+    # Bestem hvilken kolonne der skal bruges til style numbers: "Style Number" hvis tilgængelig, ellers "Style Name"
     style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
     
     # Debug: Udskriv unikke værdier fra den valgte kolonne for at se, hvad der indgår
@@ -182,3 +182,4 @@ if excel_file and zip_file:
     # Samlet download-knap (brug kun denne!)
     with open(desc_file_path, "rb") as file:
         st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
+

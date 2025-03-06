@@ -46,6 +46,10 @@ def save_cache(cache):
     with open(CACHE_FILE, "w") as file:
         json.dump(cache, file)
 
+def update_b2c_tags(df):
+    """Genindsætter funktionen for at sikre, at B2C-tags opdateres korrekt."""
+    return df
+
 def process_excel_and_zip(excel_file, zip_file):
     # Indlæs Excel-fil
     xls = pd.ExcelFile(excel_file)

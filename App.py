@@ -122,9 +122,10 @@ def extract_images_from_zip(zip_file):
     with zipfile.ZipFile(zip_file) as z:
         for file_name in z.namelist():
             if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                match = re.search(r"(SR\d{3}-\d{3})", file_name)
+                # Matcher både "SR123456" og "SR123-456", konverteres til standardformat "SR123-456"
+                match = re.search(r"SR(\d{3})-?(\d{3})", file_name, re.IGNORECASE)
                 if match:
-                    style_no = match.group(1)
+                    style_no = f"SR{match.group(1)}-{match.group(2)}"
                     data = z.read(file_name)
                     tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(file_name)[1])
                     tmp_file.write(data)
@@ -148,9 +149,10 @@ if excel_file and zip_file:
     descriptions = []
     for idx, row in df.iterrows():
         style_text = str(row[style_column])
-        match = re.search(r"(SR\d{3}-\d{3})", style_text)
+        # Matcher både "SR123456" og "SR123-456"
+        match = re.search(r"SR(\d{3})-?(\d{3})", style_text, re.IGNORECASE)
         if match:
-            style_no = match.group(1)
+            style_no = f"SR{match.group(1)}-{match.group(2)}"
             if style_no in cache:
                 desc = cache[style_no]
             elif style_no in image_mapping:
@@ -171,8 +173,11 @@ if excel_file and zip_file:
         df.to_excel(tmp.name, index=False, sheet_name='Updated Data with Descriptions')
         desc_file_path = tmp.name
 
-    # Gem cache for at genbruge beskrivelser ved eventuelle fremtidige kørsel
+    # Gem cache for at genbruge beskrivelser ved eventuelle fremtidige kørsler
     save_cache(cache)
     st.success("Descriptions added to products!")
+    
+    # Samlet download-knap (brug kun denne!)
     with open(desc_file_path, "rb") as file:
-        st.download_button("Download Excel with Descriptions", file, "processed_data_with_descriptions.xlsx")
+        st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
+

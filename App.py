@@ -118,53 +118,42 @@ import os
 
 def parse_style_number(raw_str: str) -> str or None:
     """
-    Forsøger at udtrække og normalisere et stylenummer i formatet "SRxxx-xxx" fra en given streng.
+    Udtrækker et stylenummer i formatet "SRxxx-xxx" fra en given streng.
     Eksempler:
       - "SR425-706"         -> "SR425-706"
       - "SR425706"          -> "SR425-706"
       - "SR425-706_103_1"    -> "SR425-706"
     Metoden:
-      1. Hvis der er en underscore, behold kun den del før den.
-      2. Fjern alle tegn, der ikke er bogstaver, cifre eller bindestreg.
-      3. Forsøg at finde et match af typen "SR\d{3}-\d{3}".
-      4. Hvis ikke, se om vi kan finde "SR\d{6}" og indsæt bindestreg.
+      1. Splitter på underscore og beholder den første del.
+      2. Fjerner mellemrum.
+      3. Søger efter et match på enten "SR\d{3}-\d{3}" eller "SR\d{6}".
     """
     if not raw_str:
         return None
-    # Konverter til streng, fjern ledende/slående whitespace
-    s = str(raw_str).upper().strip()
-    # Hvis der er en underscore, behold kun den del før den.
-    if "_" in s:
-        s = s.split("_", 1)[0]
-    # Fjern alle tegn, der ikke er A-Z, 0-9 eller bindestreg.
-    s = re.sub(r"[^A-Z0-9-]", "", s)
-    # Prøv at finde et match med bindestreg
-    m = re.search(r"(SR\d{3}-\d{3})", s)
-    if m:
-        return m.group(1)
-    # Hvis intet match, fjern eventuel bindestreg og prøv igen, hvis der er 6 cifre
-    s_no_dash = s.replace("-", "")
-    m = re.search(r"(SR\d{6})", s_no_dash)
-    if m:
-        num = m.group(1)
-        return f"SR{num[2:5]}-{num[5:]}"
+    s = str(raw_str)
+    s = s.split("_")[0]         # Ignorer alt efter underscore
+    s = s.replace(" ", "")        # Fjern mellemrum
+    matches = re.findall(r"(SR\d{3}-\d{3}|SR\d{6})", s, re.IGNORECASE)
+    if matches:
+        candidate = matches[0].upper()
+        if "-" in candidate:
+            return candidate
+        else:
+            # Hvis candidate f.eks. er "SR425706", indsæt bindestreg til "SR425-706"
+            return candidate[:5] + "-" + candidate[5:]
     return None
 
 def extract_images_from_zip(zip_file):
     """
     Udtrækker billeder fra ZIP-filen og returnerer et dictionary,
     der mapper et stylenummer (i formatet "SRxxx-xxx") til en midlertidig filsti.
-    Her splittes billedfilnavnet ved den første underscore.
     """
     image_mapping = {}
     with zipfile.ZipFile(zip_file) as z:
         for file_name in z.namelist():
             if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
                 base_name = os.path.basename(file_name)
-                # Fjern filtypen og alt efter den første underscore
                 base_no_ext = os.path.splitext(base_name)[0]
-                if "_" in base_no_ext:
-                    base_no_ext = base_no_ext.split("_", 1)[0]
                 style_no = parse_style_number(base_no_ext)
                 if style_no:
                     data = z.read(file_name)
@@ -174,7 +163,6 @@ def extract_images_from_zip(zip_file):
                     image_mapping[style_no] = tmp_file.name
     return image_mapping
 
-# Hovedkoden – den skal placeres efter den låste kode.
 if excel_file and zip_file:
     # Indlæs den allerede behandlede Excel-fil
     df = pd.read_excel(processed_file_path)
@@ -183,7 +171,12 @@ if excel_file and zip_file:
     image_mapping = extract_images_from_zip(zip_file)
     
     # Brug "Style Number" hvis den findes, ellers "Style Name"
-    style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
+    if "Style Number" in df.columns:
+        style_column = "Style Number"
+    elif "Style Name" in df.columns:
+        style_column = "Style Name"
+    else:
+        style_column = df.columns[0]
     
     cache = load_cache()
     descriptions = []

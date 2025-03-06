@@ -104,7 +104,6 @@ def process_excel_and_zip(excel_file, zip_file):
 # Streamlit UI
 st.title("Product Data Processor")
 
-excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 # Ændr uploaderen for billeder, så den accepterer flere ZIP-filer
 excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True)

@@ -175,7 +175,6 @@ if excel_file and zip_file:
 
     # Gem cache for at genbruge beskrivelser ved eventuelle fremtidige kørsler
     save_cache(cache)
-    st.success("Descriptions added to products!")
     
     # Samlet download-knap (brug kun denne!)
     with open(desc_file_path, "rb") as file:

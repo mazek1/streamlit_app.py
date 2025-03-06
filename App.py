@@ -76,6 +76,7 @@ def update_b2c_tags(df):
     
     # Tilføj materialekvaliteten som et tag uden procentdelen
     df["Quality Tags"] = df["Quality"].str.replace(r"\d+%", "", regex=True).str.strip()
+    df["Quality Tags"] = df["Quality Tags"].apply(lambda x: ",".join(set(x.split())))
     df["B2C Tags"] = df.apply(lambda row: ",".join(set([row["B2C Tags"], row["Quality Tags"]])) if row["Quality Tags"] else row["B2C Tags"], axis=1)
     df["B2C Tags"] = df["B2C Tags"].str.strip(",")
     df.drop(columns=["Quality Tags"], inplace=True)

@@ -63,7 +63,9 @@ def update_b2c_tags(df):
         "v-neck": ["v-neck", "v neck", "v-hals", "v-halsausschnitt"],
         "ecovero": ["ecovero"],
         "gots": ["gots", "_tag_gots"],
-        "_tag_grs": ["_tag_grs"]
+        "_tag_grs": ["_tag_grs"],
+        "tencel": ["tencel"],
+        "lenzing": ["lenzing", "ecovero"]
     }
 
     df["B2C Tags"] = df["B2C Tags"].fillna("").astype(str)
@@ -74,8 +76,8 @@ def update_b2c_tags(df):
             lambda x: ",".join(set(x.split(",") + values)).strip(",")
         )
     
-    # Tilføj materialekvaliteten som et tag uden procentdelen
-    df["Quality Tags"] = df["Quality"].str.replace(r"\d+%", "", regex=True).str.strip()
+    # Tilføj materialekvaliteten som et tag uden procentdelen og fjern TM, () og bindestreger
+    df["Quality Tags"] = df["Quality"].str.replace(r"\d+%", "", regex=True).str.replace(r"[™()\-]", "", regex=True).str.strip()
     df["Quality Tags"] = df["Quality Tags"].apply(lambda x: ",".join(set(x.split())))
     df["B2C Tags"] = df.apply(lambda row: ",".join(set([row["B2C Tags"], row["Quality Tags"]])) if row["Quality Tags"] else row["B2C Tags"], axis=1)
     df["B2C Tags"] = df["B2C Tags"].str.strip(",")

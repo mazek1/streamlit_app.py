@@ -118,50 +118,39 @@ import os
 
 def parse_style_number(raw_str: str) -> str or None:
     """
-    Forsøger at normalisere en streng til formatet 'SRxxx-xxx'.
-    Eksempler på gyldige input:
-      - 'SR425706'
-      - 'SR425-706'
-      - 'SR 425 706'
-      - 'sr425706'
-      - 'SR425-706_103_1'  -> bliver til 'SR425-706'
+    Udtrækker et stylenummer i formatet "SRxxx-xxx" fra en given streng.
+    Eksempler:
+      - "SR425-706"         -> "SR425-706"
+      - "SR425706"          -> "SR425-706"
+      - "SR425-706_103_1"    -> "SR425-706"
     """
     if not raw_str:
         return None
-    s = raw_str.strip()
-    # Fjern alt efter den første underscore, hvis der er en
+    s = str(raw_str).upper().strip()
+    # Hvis der er en underscore, behold kun den del før den.
     if "_" in s:
         s = s.split("_", 1)[0]
-    # Fjern alle whitespace-tegn
-    s = re.sub(r'\s+', '', s)
-    s = s.upper()
-    # Fjern alt, der ikke er bogstaver, cifre eller bindestreg
-    s = re.sub(r'[^A-Z0-9-]', '', s)
-    # Hvis s starter med "SR", fjern det midlertidigt
-    if s.startswith("SR"):
-        s = s[2:]
-    # Hvis der er en bindestreg, skal vi have to grupper på 3 cifre
-    if "-" in s:
-        parts = s.split("-")
-        if len(parts) == 2 and all(len(part) == 3 and part.isdigit() for part in parts):
-            return f"SR{parts[0]}-{parts[1]}"
-    else:
-        # Hvis s er 6 cifre, så indsæt en bindestreg mellem 3. og 4. ciffer
-        if len(s) == 6 and s.isdigit():
-            return f"SR{s[:3]}-{s[3:]}"
+    # Først forsøg: Find et match med bindestreg.
+    m = re.search(r"(SR\d{3}-\d{3})", s)
+    if m:
+        return m.group(1)
+    # Andet forsøg: Find et match uden bindestreg (6 cifre efter "SR")
+    m = re.search(r"(SR\d{6})", s)
+    if m:
+        num = m.group(1)  # f.eks. "SR425706"
+        return f"SR{num[2:5]}-{num[5:]}"  # konverter til "SR425-706"
     return None
 
 def extract_images_from_zip(zip_file):
     """
     Udtrækker billeder fra ZIP-filen og returnerer et dictionary,
-    der mapper et stylenummer (format: 'SRxxx-xxx') til en midlertidig filsti.
+    der mapper et stylenummer (format: "SRxxx-xxx") til en midlertidig filsti.
     """
     image_mapping = {}
     with zipfile.ZipFile(zip_file) as z:
         for file_name in z.namelist():
             if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
                 base_name = os.path.basename(file_name)
-                # Fjern filtypen og alt efter den første underscore
                 base_name_no_ext = os.path.splitext(base_name)[0]
                 style_no = parse_style_number(base_name_no_ext)
                 if style_no:
@@ -179,14 +168,14 @@ if excel_file and zip_file:
     # Opret mapping for billeder fra ZIP-filen
     image_mapping = extract_images_from_zip(zip_file)
     
-    # Brug "Style Number" hvis kolonnen findes, ellers "Style Name"
+    # Brug kolonnen "Style Number" hvis den findes, ellers "Style Name"
     style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
     
     cache = load_cache()
     descriptions = []
     
     for _, row in df.iterrows():
-        raw_style = str(row[style_column])
+        raw_style = str(row[style_column]).strip()
         style_no = parse_style_number(raw_style)
         if style_no is None:
             descriptions.append("No valid style number found.")

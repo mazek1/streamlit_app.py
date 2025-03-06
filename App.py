@@ -110,8 +110,6 @@ zip_file = st.file_uploader("Upload ZIP File with Images", type=["zip"])
 if excel_file and zip_file:
     st.success("Files uploaded successfully. Processing...")
     processed_file_path = process_excel_and_zip(excel_file, zip_file)
-    with open(processed_file_path, "rb") as file:
-        st.download_button("Download Processed Excel File", file, "processed_data.xlsx")
 
 import re
 

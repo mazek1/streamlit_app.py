@@ -154,6 +154,8 @@ import re
 import zipfile
 import tempfile
 import os
+import pandas as pd
+import streamlit as st
 
 def parse_style_number(raw_str: str) -> str or None:
     """
@@ -177,14 +179,14 @@ def parse_style_number(raw_str: str) -> str or None:
         return candidate[:5] + "-" + candidate[5:]
     return None
 
-def extract_images_from_zip(zip_file):
+def extract_images_from_zip(zip_file_obj):
     """
-    Udtrækker billeder fra ZIP-filen og returnerer et dictionary,
+    Udtrækker billeder fra ZIP-filen (givet som et file-objekt) og returnerer et dictionary,
     der mapper et stylenummer (i formatet "SRxxx-xxx") til en midlertidig filsti.
     """
     image_mapping = {}
-    zip_file.seek(0)
-    with zipfile.ZipFile(zip_file) as z:
+    zip_file_obj.seek(0)
+    with zipfile.ZipFile(zip_file_obj) as z:
         for file_name in z.namelist():
             if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
                 base_name = os.path.basename(file_name)
@@ -200,24 +202,23 @@ def extract_images_from_zip(zip_file):
                     image_mapping[style_no] = tmp_file.name
     return image_mapping
 
-# Den oprindelige kode definerer allerede excel_file
-# fx: excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
-# Og vi har:
+# Forudsat at den oprindelige kode allerede definerer:
+# excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+# Tilføj uploader for ZIP-filer med accept_multiple_files=True og en unik key:
 zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
 
 if excel_file and zip_files:
-    # Læs Excel-data direkte fra excel_file
+    # Læs Excel-data direkte fra den uploadede fil
     df = pd.read_excel(excel_file)
     
     combined_image_mapping = {}
-    for zip_file in zip_files:
-        mapping = extract_images_from_zip(zip_file)
+    for uploaded_zip in zip_files:
+        mapping = extract_images_from_zip(uploaded_zip)
         combined_image_mapping.update(mapping)
     
-    # Brug "Style Number" hvis den findes, ellers "Style Name"
     style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
     
-    cache = load_cache()
+    cache = load_cache()  # Sørg for, at denne funktion er defineret
     descriptions = []
     
     for _, row in df.iterrows():
@@ -230,7 +231,7 @@ if excel_file and zip_files:
             descriptions.append(cache[style_no])
         elif style_no in combined_image_mapping:
             image_path = combined_image_mapping[style_no]
-            desc = analyze_image_with_openai(image_path)
+            desc = analyze_image_with_openai(image_path)  # Sørg for, at denne funktion er defineret
             cache[style_no] = desc
             descriptions.append(desc)
         else:
@@ -242,7 +243,7 @@ if excel_file and zip_files:
         df.to_excel(tmp.name, index=False, sheet_name='Updated Data with Descriptions')
         final_file_path = tmp.name
     
-    save_cache(cache)
+    save_cache(cache)  # Sørg for, at denne funktion er defineret
     
     with open(final_file_path, "rb") as file:
         st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")

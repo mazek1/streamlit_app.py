@@ -24,11 +24,11 @@ def analyze_image_with_openai(image_path):
                 model="gpt-4-vision-preview",
                 messages=[
                     {
-                        "role": "system", 
+                        "role": "system",
                         "content": "You are an assistant that describes fashion products in a professional, inspiring, concise, and sales-oriented way. Each description should include three key points formatted as bullet points."
                     },
                     {
-                        "role": "user", 
+                        "role": "user",
                         "content": "Describe this fashion product in English, ensuring a professional tone, engaging language, and highlighting three key selling points."
                     }
                 ],
@@ -89,7 +89,7 @@ def update_b2c_tags(df):
                                       .str.strip()
     df["Quality Tags"] = df["Quality Tags"].apply(lambda x: ",".join(set(x.split())))
     df["B2C Tags"] = df.apply(
-        lambda row: ",".join(set([row["B2C Tags"], row["Quality Tags"]])) if row["Quality Tags"] else row["B2C Tags"], 
+        lambda row: ",".join(set([row["B2C Tags"], row["Quality Tags"]])) if row["Quality Tags"] else row["B2C Tags"],
         axis=1
     )
     df["B2C Tags"] = df["B2C Tags"].str.strip(",")
@@ -121,4 +121,79 @@ def parse_style_number(raw_str: str) -> str or None:
 
 def extract_images_from_zip(uploaded_zip):
     """
-    Udtrækker billeder fra den uploadede ZIP-fil (et Streamlit 
+    Udtrækker billeder fra den uploadede ZIP-fil (et Streamlit UploadedFile-objekt)
+    og returnerer et dictionary, der mapper et stylenummer (formatet "SRxxx-xxx")
+    til en midlertidig filsti.
+    """
+    image_mapping = {}
+    zip_bytes = uploaded_zip.read()
+    bytes_obj = BytesIO(zip_bytes)
+    with zipfile.ZipFile(bytes_obj) as z:
+        for file_name in z.namelist():
+            if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
+                base_name = os.path.basename(file_name)
+                base_no_ext = os.path.splitext(base_name)[0]
+                if "_" in base_no_ext:
+                    base_no_ext = base_no_ext.split("_", 1)[0]
+                style_no = parse_style_number(base_no_ext)
+                if style_no:
+                    data = z.read(file_name)
+                    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(base_name)[1])
+                    tmp_file.write(data)
+                    tmp_file.close()
+                    image_mapping[style_no] = tmp_file.name
+    return image_mapping
+
+# --- Streamlit UI ---
+st.title("Product Data Processor")
+
+# Vis installeret OpenAI-version
+st.write("OpenAI version:", openai.__version__)
+
+# Uploader til Excel-fil og ZIP-filer med billeder
+excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
+
+if excel_file and zip_files:
+    df = pd.read_excel(excel_file)
+    df = update_b2c_tags(df)
+    
+    # Brug kun kolonnerne "Style No." eller "Style Number"
+    if "Style No." in df.columns:
+        style_column = "Style No."
+    else:
+        style_column = "Style Number"
+    
+    combined_image_mapping = {}
+    for uploaded_zip in zip_files:
+        mapping = extract_images_from_zip(uploaded_zip)
+        combined_image_mapping.update(mapping)
+    
+    cache = load_cache()
+    descriptions = []
+    
+    for _, row in df.iterrows():
+        raw_style = str(row[style_column]).strip()
+        style_no = parse_style_number(raw_style)
+        if style_no is None:
+            descriptions.append("No valid style number found.")
+            continue
+        if style_no in cache:
+            descriptions.append(cache[style_no])
+        elif style_no in combined_image_mapping:
+            image_path = combined_image_mapping[style_no]
+            desc = analyze_image_with_openai(image_path)
+            cache[style_no] = desc
+            descriptions.append(desc)
+        else:
+            descriptions.append(f"No matching image found for style {style_no}")
+    
+    df["Description"] = descriptions
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
+        df.to_excel(tmp.name, index=False, sheet_name='Updated Data with Descriptions')
+        final_file_path = tmp.name
+    
+    save_cache(cache)
+    
+    st.download_button("Download Final Excel File", open(final_file_path, "rb"), "processed_data_with_descriptions.xlsx")

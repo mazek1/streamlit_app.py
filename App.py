@@ -187,26 +187,30 @@ def extract_images_from_zip(uploaded_zip):
     Læser filen som bytes via BytesIO.
     """
     image_mapping = {}
-    zip_bytes = uploaded_zip.read()
-    with zipfile.ZipFile(BytesIO(zip_bytes)) as z:
-        for file_name in z.namelist():
-            if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
-                base_name = os.path.basename(file_name)
-                base_no_ext = os.path.splitext(base_name)[0]
-                if "_" in base_no_ext:
-                    base_no_ext = base_no_ext.split("_", 1)[0]
-                style_no = parse_style_number(base_no_ext)
-                if style_no:
-                    data = z.read(file_name)
-                    tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(base_name)[1])
-                    tmp_file.write(data)
-                    tmp_file.close()
-                    image_mapping[style_no] = tmp_file.name
+    try:
+        # Læs bytes fra uploaded_zip og pak dem ind i et BytesIO-objekt
+        zip_bytes = uploaded_zip.read()
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as z:
+            for file_name in z.namelist():
+                if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    base_name = os.path.basename(file_name)
+                    base_no_ext = os.path.splitext(base_name)[0]
+                    if "_" in base_no_ext:
+                        base_no_ext = base_no_ext.split("_", 1)[0]
+                    style_no = parse_style_number(base_no_ext)
+                    if style_no:
+                        data = z.read(file_name)
+                        tmp_file = tempfile.NamedTemporaryFile(delete=False, suffix=os.path.splitext(base_name)[1])
+                        tmp_file.write(data)
+                        tmp_file.close()
+                        image_mapping[style_no] = tmp_file.name
+    except Exception as e:
+        st.write("Fejl i extract_images_from_zip:", e)
     return image_mapping
 
-# Her antages det, at den låste kode allerede definerer Excel-uploaderen:
+# Forudsat at den oprindelige kode allerede definerer Excel-uploaderen:
 # excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
-# Tilføj uploader for ZIP-filer med accept_multiple_files=True og en unik key:
+# Her tilføjes uploaderen til ZIP-filer med accept_multiple_files=True og en unik key:
 zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
 
 if excel_file and zip_files:
@@ -215,13 +219,14 @@ if excel_file and zip_files:
     
     combined_image_mapping = {}
     for uploaded_zip in zip_files:
+        st.write("Behandler ZIP-fil: ", uploaded_zip.name)  # Debug-udskrift
         mapping = extract_images_from_zip(uploaded_zip)
+        st.write("Mapping fra denne ZIP-fil:", mapping)  # Debug-udskrift
         combined_image_mapping.update(mapping)
     
-    # Vælg den kolonne, der indeholder stylenumre – fortrinsvis "Style Number", ellers "Style Name"
     style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
     
-    cache = load_cache()  # Skal være defineret i din oprindelige kode
+    cache = load_cache()  # Sørg for, at denne funktion er defineret i din oprindelige kode
     descriptions = []
     
     for _, row in df.iterrows():
@@ -234,7 +239,7 @@ if excel_file and zip_files:
             descriptions.append(cache[style_no])
         elif style_no in combined_image_mapping:
             image_path = combined_image_mapping[style_no]
-            desc = analyze_image_with_openai(image_path)  # Skal være defineret i din oprindelige kode
+            desc = analyze_image_with_openai(image_path)  # Sørg for, at denne funktion er defineret
             cache[style_no] = desc
             descriptions.append(desc)
         else:
@@ -246,7 +251,8 @@ if excel_file and zip_files:
         df.to_excel(tmp.name, index=False, sheet_name='Updated Data with Descriptions')
         final_file_path = tmp.name
     
-    save_cache(cache)  # Skal være defineret i din oprindelige kode
+    save_cache(cache)  # Sørg for, at denne funktion er defineret
     
     with open(final_file_path, "rb") as file:
         st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
+

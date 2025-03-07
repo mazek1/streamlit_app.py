@@ -3,59 +3,41 @@ import pandas as pd
 import zipfile
 import os
 import tempfile
-import openai
 import json
 import re
 from io import BytesIO
 from PIL import Image
+from transformers import BlipProcessor, BlipForConditionalGeneration
+
+# Indlæs BLIP-modellen og processor
+processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
+model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
 
 # Definer en fast sti til cache-filen, så den overlever genstarter
 CACHE_FILE = ".streamlit/description_cache.json"
 
-def analyze_image_with_openai(image_path):
+def analyze_image(image_path):
     """
-    Bruger OpenAI Vision API til at analysere billedet og generere en beskrivelse.
-    Hvis du får en fejl vedr. openai.ChatCompletion, skal du sikre, at du bruger openai==0.28.
+    Bruger BLIP-modellen til at generere en beskrivelse af billedet.
     """
-    openai.api_key = os.getenv("OPENAI_API_KEY")
-    try:
-        with open(image_path, "rb") as image_file:
-            response = openai.ChatCompletion.create(
-                model="gpt-4-vision-preview",
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are an assistant that describes fashion products in a professional, inspiring, concise, and sales-oriented way. Each description should include three key points formatted as bullet points."
-                    },
-                    {
-                        "role": "user",
-                        "content": "Describe this fashion product in English, ensuring a professional tone, engaging language, and highlighting three key selling points."
-                    }
-                ],
-                files={"image": image_file}
-            )
-        if "choices" in response and response["choices"]:
-            return response["choices"][0]["message"]["content"]
-        else:
-            return "No description available."
-    except Exception as e:
-        return f"Error generating description: {str(e)}"
+    image = Image.open(image_path).convert("RGB")
+    inputs = processor(image, return_tensors="pt")
+    out = model.generate(**inputs)
+    caption = processor.decode(out[0], skip_special_tokens=True)
+    return caption
 
 def load_cache():
-    """Indlæser cache-filen, hvis den findes."""
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r") as file:
             return json.load(file)
     return {}
 
 def save_cache(cache):
-    """Gemmer cache-filen."""
     os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
     with open(CACHE_FILE, "w") as file:
         json.dump(cache, file)
 
 def update_b2c_tags(df):
-    """Opdaterer B2C Tags baseret på Style Name og Quality."""
     tag_translations = {
         "shirt": ["shirt", "shirts", "skjorte", "skjorter", "hemd", "hemden"],
         "blouse": ["blouse", "blouses", "blus", "blusar", "bluse", "blusen"],
@@ -75,36 +57,18 @@ def update_b2c_tags(df):
         "tencel": ["tencel"],
         "lenzing": ["lenzing", "ecovero"]
     }
-
     df["B2C Tags"] = df["B2C Tags"].fillna("").astype(str)
-
     for key, values in tag_translations.items():
         mask = df["Style Name"].str.contains(key, case=False, na=False)
-        df.loc[mask, "B2C Tags"] = df.loc[mask, "B2C Tags"].apply(
-            lambda x: ",".join(set(x.split(",") + values)).strip(",")
-        )
-    
-    df["Quality Tags"] = df["Quality"].str.replace(r"\d+%", "", regex=True)\
-                                      .str.replace(r"[™()\-]", "", regex=True)\
-                                      .str.strip()
+        df.loc[mask, "B2C Tags"] = df.loc[mask, "B2C Tags"].apply(lambda x: ",".join(set(x.split(",") + values)).strip(","))
+    df["Quality Tags"] = df["Quality"].str.replace(r"\d+%", "", regex=True).str.replace(r"[™()\-]", "", regex=True).str.strip()
     df["Quality Tags"] = df["Quality Tags"].apply(lambda x: ",".join(set(x.split())))
-    df["B2C Tags"] = df.apply(
-        lambda row: ",".join(set([row["B2C Tags"], row["Quality Tags"]])) if row["Quality Tags"] else row["B2C Tags"],
-        axis=1
-    )
+    df["B2C Tags"] = df.apply(lambda row: ",".join(set([row["B2C Tags"], row["Quality Tags"]])) if row["Quality Tags"] else row["B2C Tags"], axis=1)
     df["B2C Tags"] = df["B2C Tags"].str.strip(",")
     df.drop(columns=["Quality Tags"], inplace=True)
-    
     return df
 
 def parse_style_number(raw_str: str) -> str or None:
-    """
-    Udtrækker et stylenummer i formatet "SRxxx-xxx" fra en given streng.
-    Eksempler:
-      - "SR425-706"         -> "SR425-706"
-      - "SR425706"          -> "SR425-706"
-      - "SR425-706_103_1"    -> "SR425-706"
-    """
     if not raw_str:
         return None
     s = str(raw_str).upper().strip()
@@ -120,11 +84,6 @@ def parse_style_number(raw_str: str) -> str or None:
     return None
 
 def extract_images_from_zip(uploaded_zip):
-    """
-    Udtrækker billeder fra den uploadede ZIP-fil (et Streamlit UploadedFile-objekt)
-    og returnerer et dictionary, der mapper et stylenummer (formatet "SRxxx-xxx")
-    til en midlertidig filsti.
-    """
     image_mapping = {}
     zip_bytes = uploaded_zip.read()
     bytes_obj = BytesIO(zip_bytes)
@@ -146,9 +105,6 @@ def extract_images_from_zip(uploaded_zip):
 
 # --- Streamlit UI ---
 st.title("Product Data Processor")
-
-# Vis installeret OpenAI-version
-st.write("OpenAI version:", openai.__version__)
 
 # Uploader til Excel-fil og ZIP-filer med billeder
 excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
@@ -182,7 +138,7 @@ if excel_file and zip_files:
             descriptions.append(cache[style_no])
         elif style_no in combined_image_mapping:
             image_path = combined_image_mapping[style_no]
-            desc = analyze_image_with_openai(image_path)
+            desc = analyze_image(image_path)
             cache[style_no] = desc
             descriptions.append(desc)
         else:

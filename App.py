@@ -111,7 +111,7 @@ excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
 
 if excel_file and zip_files:
-    df = pd.read_excel(processed_file_path)
+    df = pd.read_excel(excel_file)
     
     combined_image_mapping = {}
     for zip_file in zip_files:

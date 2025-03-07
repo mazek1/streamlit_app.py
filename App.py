@@ -7,30 +7,108 @@ import json
 import re
 from io import BytesIO
 from PIL import Image
-from transformers import BlipProcessor, BlipForConditionalGeneration
+import torch
+from transformers import VisionEncoderDecoderModel, ViTImageProcessor, AutoTokenizer
 
-# Indlæs BLIP-modellen og processor (kræver 'transformers' og 'torch')
-processor = BlipProcessor.from_pretrained("Salesforce/blip-image-captioning-base")
-model = BlipForConditionalGeneration.from_pretrained("Salesforce/blip-image-captioning-base")
+# ------------------------------------------------------------------------
+# 1. Lazy-load ViT-GPT2-modelen (fra nlpconnect/vit-gpt2-image-captioning)
+# ------------------------------------------------------------------------
+def analyze_image(image_path):
+    """
+    Anvender ViT-GPT2 til billedbeskrivelse.
+    Modellen loades først, når funktionen kaldes første gang.
+    """
+    if "model" not in st.session_state:
+        with st.spinner("Loading image captioning model..."):
+            # Hent processor og model fra Hugging Face
+            st.session_state["feature_extractor"] = ViTImageProcessor.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+            st.session_state["tokenizer"] = AutoTokenizer.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+            st.session_state["model"] = VisionEncoderDecoderModel.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
+    
+    feature_extractor = st.session_state["feature_extractor"]
+    tokenizer = st.session_state["tokenizer"]
+    model = st.session_state["model"]
 
-# Definer en fast sti til cache-filen, så den overlever genstarter
+    # Hvis GPU ikke er tilgængelig, bruges CPU
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    model.to(device)
+
+    # Åbn billedet og konverter til RGB
+    image = Image.open(image_path).convert("RGB")
+    pixel_values = feature_extractor(image, return_tensors="pt").pixel_values
+    pixel_values = pixel_values.to(device)
+
+    # Parametre til tekstgenerering
+    gen_kwargs = {
+        "max_length": 30,
+        "num_beams": 4
+    }
+
+    output_ids = model.generate(pixel_values, **gen_kwargs)
+    preds = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
+    caption = preds[0].strip()
+    return caption
+
+# ------------------------------------------------------------------------
+# 2. Eksempel på post-proces for at få en bestemt formatering (valgfrit)
+# ------------------------------------------------------------------------
+def generate_custom_description(row, raw_caption):
+    """
+    Eksempel på, hvordan du kan forme din tekst:
+    1) Kort overskrift (2-3 ord).
+    2) Materiale fra Excel (Quality).
+    3) Selve billedbeskrivelsen (evt. med filtrering af ord).
+    4) Tre bullet points.
+    """
+    # Fjern uønskede ord (fx "woman", "man", "wearing", osv.)
+    cleaned_caption = re.sub(r"\bwoman\b|\bman\b|\bwearing\b|\bperson\b|\bpeople\b", "", raw_caption, flags=re.IGNORECASE).strip()
+
+    # Eksempel på overskrift: "Chic <Style Name>"
+    style_name = str(row.get("Style Name", "")).strip()
+    if style_name:
+        short_title = f"Chic {style_name}"
+    else:
+        short_title = "Chic piece"
+
+    # Tilføj materiale fra "Quality"
+    material = str(row.get("Quality", "")).strip()
+    if material:
+        material_text = f"Made from {material}. "
+    else:
+        material_text = ""
+
+    bullet_points = [
+        "Comfortable fit",
+        "Timeless design",
+        "Versatile styling"
+    ]
+
+    # Byg endelig tekst
+    description = (
+        f"{short_title}\n\n"
+        f"{material_text}This style is best described as: {cleaned_caption}.\n\n"
+        "Key Features:\n"
+        + "\n".join(f"- {bp}" for bp in bullet_points)
+    )
+    return description
+
+# ------------------------------------------------------------------------
+# 3. Cache & Tag-funktioner (som før)
+# ------------------------------------------------------------------------
 CACHE_FILE = ".streamlit/description_cache.json"
 
 def load_cache():
-    """Indlæser cache-filen, hvis den findes."""
     if os.path.exists(CACHE_FILE):
         with open(CACHE_FILE, "r") as file:
             return json.load(file)
     return {}
 
 def save_cache(cache):
-    """Gemmer cache-filen."""
     os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
     with open(CACHE_FILE, "w") as file:
         json.dump(cache, file)
 
 def update_b2c_tags(df):
-    """Opdaterer B2C Tags baseret på Style Name og Quality."""
     tag_translations = {
         "shirt": ["shirt", "shirts", "skjorte", "skjorter", "hemd", "hemden"],
         "blouse": ["blouse", "blouses", "blus", "blusar", "bluse", "blusen"],
@@ -50,37 +128,22 @@ def update_b2c_tags(df):
         "tencel": ["tencel"],
         "lenzing": ["lenzing", "ecovero"]
     }
-
     df["B2C Tags"] = df["B2C Tags"].fillna("").astype(str)
-
     for key, values in tag_translations.items():
         mask = df["Style Name"].str.contains(key, case=False, na=False)
         df.loc[mask, "B2C Tags"] = df.loc[mask, "B2C Tags"].apply(
             lambda x: ",".join(set(x.split(",") + values)).strip(",")
         )
-    
-    # Tilføj materialekvaliteten som et tag uden procentdel og fjern visse tegn
     df["Quality Tags"] = df["Quality"].str.replace(r"\d+%", "", regex=True)\
                                       .str.replace(r"[™()\-]", "", regex=True)\
                                       .str.strip()
     df["Quality Tags"] = df["Quality Tags"].apply(lambda x: ",".join(set(x.split())))
-    df["B2C Tags"] = df.apply(
-        lambda row: ",".join(set([row["B2C Tags"], row["Quality Tags"]])) if row["Quality Tags"] else row["B2C Tags"], 
-        axis=1
-    )
+    df["B2C Tags"] = df.apply(lambda row: ",".join(set([row["B2C Tags"], row["Quality Tags"]])) if row["Quality Tags"] else row["B2C Tags"], axis=1)
     df["B2C Tags"] = df["B2C Tags"].str.strip(",")
     df.drop(columns=["Quality Tags"], inplace=True)
-    
     return df
 
 def parse_style_number(raw_str: str) -> str or None:
-    """
-    Udtrækker et stylenummer i formatet "SRxxx-xxx" fra en given streng.
-    Eksempler:
-      - "SR425-706"         -> "SR425-706"
-      - "SR425706"          -> "SR425-706"
-      - "SR425-706_103_1"   -> "SR425-706"
-    """
     if not raw_str:
         return None
     s = str(raw_str).upper().strip()
@@ -96,10 +159,6 @@ def parse_style_number(raw_str: str) -> str or None:
     return None
 
 def extract_images_from_zip(uploaded_zip):
-    """
-    Udtrækker billeder fra den uploadede ZIP-fil (et Streamlit UploadedFile-objekt)
-    og returnerer et dictionary, der mapper stylenummer (SRxxx-xxx) til filsti.
-    """
     image_mapping = {}
     zip_bytes = uploaded_zip.read()
     bytes_obj = BytesIO(zip_bytes)
@@ -119,59 +178,9 @@ def extract_images_from_zip(uploaded_zip):
                     image_mapping[style_no] = tmp_file.name
     return image_mapping
 
-def generate_custom_description(row, raw_caption):
-    """
-    1) Fjern ord som 'woman', 'man', 'wearing', osv.
-    2) Skab en kort overskrift (2-3 ord).
-    3) Inkluder materialet fra Excel-filen.
-    4) Tilføj 3 bullet points.
-    """
-    # Rens uønskede ord fra BLIP-beskrivelsen
-    cleaned_caption = re.sub(r'\bwoman\b|\bman\b|\bwearing\b|\bperson\b|\bpeople\b', '', raw_caption, flags=re.IGNORECASE).strip()
-    
-    # Kort overskrift (2-3 ord). Du kan selv definere logikken:
-    # Her bruger vi enten "Chic + [Style Name]" eller "Chic piece" hvis Style Name mangler.
-    style_name = str(row.get("Style Name", "")).strip()
-    if style_name:
-        short_title = f"Chic {style_name}"
-    else:
-        short_title = "Chic piece"
-    
-    # Materiale fra Excel (Quality-kolonnen)
-    material = str(row.get("Quality", "")).strip()
-    if material:
-        material_text = f"Made from {material}. "
-    else:
-        material_text = ""
-    
-    # Skab 3 bullet points. Du kan selv definere mere avanceret logik her.
-    bullet_points = [
-        "Comfortable fit",
-        "Timeless design",
-        "Versatile styling"
-    ]
-    
-    # Byg den endelige beskrivelse
-    description = (
-        f"{short_title}\n\n"
-        f"{material_text}This style offers a {cleaned_caption}.\n\n"
-        "Key Features:\n"
-        + "\n".join(f"- {bp}" for bp in bullet_points)
-    )
-    
-    return description
-
-def analyze_image(image_path):
-    """
-    Bruger BLIP til at generere en rå billedbeskrivelse.
-    """
-    image = Image.open(image_path).convert("RGB")
-    inputs = processor(image, return_tensors="pt")
-    out = model.generate(**inputs)
-    caption = processor.decode(out[0], skip_special_tokens=True)
-    return caption
-
-# --- Streamlit UI ---
+# ------------------------------------------------------------------------
+# 4. Streamlit UI
+# ------------------------------------------------------------------------
 st.title("Product Data Processor")
 
 excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
@@ -181,13 +190,11 @@ if excel_file and zip_files:
     df = pd.read_excel(excel_file)
     df = update_b2c_tags(df)
     
-    # Vælg kolonne for stylenummer
     if "Style No." in df.columns:
         style_column = "Style No."
     else:
         style_column = "Style Number"
     
-    # Udpak billeder
     combined_image_mapping = {}
     for uploaded_zip in zip_files:
         mapping = extract_images_from_zip(uploaded_zip)
@@ -196,25 +203,21 @@ if excel_file and zip_files:
     cache = load_cache()
     descriptions = []
     
-    for idx, row in df.iterrows():
+    for _, row in df.iterrows():
         raw_style = str(row[style_column]).strip()
         style_no = parse_style_number(raw_style)
         if style_no is None:
             descriptions.append("No valid style number found.")
             continue
         
-        # Tjek cachen
         if style_no in cache:
             descriptions.append(cache[style_no])
         elif style_no in combined_image_mapping:
             image_path = combined_image_mapping[style_no]
-            
-            # 1) Rå beskrivelse fra BLIP
+            # Kald modellen for at få en rå billedbeskrivelse
             raw_caption = analyze_image(image_path)
-            
-            # 2) Post-proces med custom logik
+            # Tilpas teksten til en salgsmæssig form
             final_desc = generate_custom_description(row, raw_caption)
-            
             cache[style_no] = final_desc
             descriptions.append(final_desc)
         else:

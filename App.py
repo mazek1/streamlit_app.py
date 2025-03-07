@@ -5,6 +5,7 @@ import os
 import tempfile
 import openai
 import json
+import re
 from io import BytesIO
 from PIL import Image
 
@@ -77,7 +78,9 @@ def update_b2c_tags(df):
         )
     
     # Tilføj materialekvaliteten som et tag uden procentdelen og fjern TM, () og bindestreger
-    df["Quality Tags"] = df["Quality"].str.replace(r"\d+%", "", regex=True).str.replace(r"[™()\-]", "", regex=True).str.strip()
+    df["Quality Tags"] = df["Quality"].str.replace(r"\d+%", "", regex=True)\
+                                      .str.replace(r"[™()\-]", "", regex=True)\
+                                      .str.strip()
     df["Quality Tags"] = df["Quality Tags"].apply(lambda x: ",".join(set(x.split())))
     df["B2C Tags"] = df.apply(lambda row: ",".join(set([row["B2C Tags"], row["Quality Tags"]])) if row["Quality Tags"] else row["B2C Tags"], axis=1)
     df["B2C Tags"] = df["B2C Tags"].str.strip(",")
@@ -100,73 +103,6 @@ def process_excel_and_zips(excel_file, zip_files):
     
     st.success("Processing Completed!")
     return tmp_path
-
-# Streamlit UI
-st.title("Product Data Processor")
-
-# Ændr uploaderen for billeder, så den accepterer excel flere ZIP-filer
-excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
-
-# Opret uploader for ZIP-filer med en unik key:
-zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
-
-if excel_file and zip_files:
-    df = pd.read_excel(excel_file)
-    
-    combined_image_mapping = {}
-for uploaded_zip in zip_files:
-    mapping = extract_images_from_zip(uploaded_zip)
-    combined_image_mapping.update(mapping)
-    
-    style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
-    
-    cache = load_cache()
-    descriptions = []
-    
-    for _, row in df.iterrows():
-        raw_style = str(row[style_column]).strip()
-        style_no = parse_style_number(raw_style)
-        if style_no is None:
-            descriptions.append("No valid style number found.")
-            continue
-        if style_no in cache:
-            descriptions.append(cache[style_no])
-        elif style_no in combined_image_mapping:
-            image_path = combined_image_mapping[style_no]
-            desc = analyze_image_with_openai(image_path)
-            cache[style_no] = desc
-            descriptions.append(desc)
-        else:
-            descriptions.append(f"No matching image found for style {style_no}")
-    
-    df["Description"] = descriptions
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-        df.to_excel(tmp.name, index=False, sheet_name='Updated Data with Descriptions')
-        final_file_path = tmp.name
-    
-    save_cache(cache)
-    
-    with open(final_file_path, "rb") as file:
-        st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
-
-import streamlit as st
-import pandas as pd
-import zipfile
-import tempfile
-import os
-import re
-from io import BytesIO
-
-# Dummy-funktioner – erstat med dine egentlige implementeringer
-def load_cache():
-    return {}
-
-def save_cache(cache):
-    pass
-
-def analyze_image_with_openai(image_path):
-    return "Beskrivelse for " + os.path.basename(image_path)
 
 def parse_style_number(raw_str: str) -> str or None:
     """
@@ -223,18 +159,17 @@ def extract_images_from_zip(uploaded_zip):
         st.write("Fejl i extract_images_from_zip:", e)
     return image_mapping
 
-# Her antages det, at den oprindelige kode allerede definerer Excel-uploaderen:
-excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+# Streamlit UI
+st.title("Product Data Processor")
 
-# Opret uploader for ZIP-filer med accept_multiple_files=True og en unik key
+# Ændr uploaderen for billeder, så den accepterer Excel og flere ZIP-filer
+excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
 zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
 
 if excel_file and zip_files:
-    # Læs Excel-data direkte fra den uploadede fil
     df = pd.read_excel(excel_file)
     
     combined_image_mapping = {}
-    # Her bruges variabelnavnet 'uploaded_zip' ensartet
     for uploaded_zip in zip_files:
         mapping = extract_images_from_zip(uploaded_zip)
         combined_image_mapping.update(mapping)

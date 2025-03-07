@@ -150,13 +150,23 @@ for uploaded_zip in zip_files:
     with open(final_file_path, "rb") as file:
         st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
 
-import re
+import streamlit as st
+import pandas as pd
 import zipfile
 import tempfile
 import os
-import pandas as pd
-import streamlit as st
+import re
 from io import BytesIO
+
+# Dummy-funktioner – erstat med dine egentlige implementeringer
+def load_cache():
+    return {}
+
+def save_cache(cache):
+    pass
+
+def analyze_image_with_openai(image_path):
+    return "Beskrivelse for " + os.path.basename(image_path)
 
 def parse_style_number(raw_str: str) -> str or None:
     """
@@ -169,11 +179,14 @@ def parse_style_number(raw_str: str) -> str or None:
     if not raw_str:
         return None
     s = str(raw_str).upper().strip()
+    # Behold kun den del før en eventuel underscore
     if "_" in s:
         s = s.split("_", 1)[0]
+    # Først forsøg: find et match med bindestreg
     m = re.search(r"(SR\d{3}-\d{3})", s)
     if m:
         return m.group(1)
+    # Andet forsøg: find et match uden bindestreg (6 cifre)
     m = re.search(r"(SR\d{6})", s)
     if m:
         candidate = m.group(1)
@@ -188,7 +201,7 @@ def extract_images_from_zip(uploaded_zip):
     """
     image_mapping = {}
     try:
-        # Læs filen som bytes og opret et BytesIO-objekt
+        # Læs filen som bytes og pak dem ind i et BytesIO-objekt
         zip_bytes = uploaded_zip.read()
         bytes_obj = BytesIO(zip_bytes)
         with zipfile.ZipFile(bytes_obj) as z:
@@ -196,6 +209,7 @@ def extract_images_from_zip(uploaded_zip):
                 if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
                     base_name = os.path.basename(file_name)
                     base_no_ext = os.path.splitext(base_name)[0]
+                    # Behold kun den del før den første underscore
                     if "_" in base_no_ext:
                         base_no_ext = base_no_ext.split("_", 1)[0]
                     style_no = parse_style_number(base_no_ext)
@@ -209,9 +223,10 @@ def extract_images_from_zip(uploaded_zip):
         st.write("Fejl i extract_images_from_zip:", e)
     return image_mapping
 
-# Forudsat at den låste kode allerede definerer:
-# excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
-# Her tilføjes uploader for ZIP-filer med accept_multiple_files=True og en unik key:
+# Her antages det, at den oprindelige kode allerede definerer Excel-uploaderen:
+excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+
+# Opret uploader for ZIP-filer med accept_multiple_files=True og en unik key
 zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
 
 if excel_file and zip_files:
@@ -219,16 +234,15 @@ if excel_file and zip_files:
     df = pd.read_excel(excel_file)
     
     combined_image_mapping = {}
-    # Brug et entydigt variabelnavn (her "file") for at undgå forvirring
-    for file in zip_files:
-        st.write("Behandler ZIP-fil:", file.name)  # Debug-udskrift
-        mapping = extract_images_from_zip(file)
-        st.write("Mapping fra ZIP-fil:", mapping)  # Debug-udskrift
+    # Her bruges variabelnavnet 'uploaded_zip' ensartet
+    for uploaded_zip in zip_files:
+        mapping = extract_images_from_zip(uploaded_zip)
         combined_image_mapping.update(mapping)
     
+    # Brug "Style Number" hvis tilgængelig, ellers "Style Name"
     style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
     
-    cache = load_cache()  # Sørg for, at load_cache() er defineret i din oprindelige kode
+    cache = load_cache()
     descriptions = []
     
     for _, row in df.iterrows():
@@ -241,7 +255,7 @@ if excel_file and zip_files:
             descriptions.append(cache[style_no])
         elif style_no in combined_image_mapping:
             image_path = combined_image_mapping[style_no]
-            desc = analyze_image_with_openai(image_path)  # Sørg for, at denne funktion er defineret
+            desc = analyze_image_with_openai(image_path)
             cache[style_no] = desc
             descriptions.append(desc)
         else:
@@ -253,8 +267,7 @@ if excel_file and zip_files:
         df.to_excel(tmp.name, index=False, sheet_name='Updated Data with Descriptions')
         final_file_path = tmp.name
     
-    save_cache(cache)  # Sørg for, at save_cache() er defineret
+    save_cache(cache)
     
     with open(final_file_path, "rb") as file:
         st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
-

@@ -20,7 +20,6 @@ def analyze_image(image_path):
     """
     if "model" not in st.session_state:
         with st.spinner("Loading image captioning model..."):
-            # Hent processor og model fra Hugging Face
             st.session_state["feature_extractor"] = ViTImageProcessor.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
             st.session_state["tokenizer"] = AutoTokenizer.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
             st.session_state["model"] = VisionEncoderDecoderModel.from_pretrained("nlpconnect/vit-gpt2-image-captioning")
@@ -29,71 +28,71 @@ def analyze_image(image_path):
     tokenizer = st.session_state["tokenizer"]
     model = st.session_state["model"]
 
-    # Hvis GPU ikke er tilgængelig, bruges CPU
     device = "cuda" if torch.cuda.is_available() else "cpu"
     model.to(device)
 
-    # Åbn billedet og konverter til RGB
     image = Image.open(image_path).convert("RGB")
-    pixel_values = feature_extractor(image, return_tensors="pt").pixel_values
-    pixel_values = pixel_values.to(device)
-
-    # Parametre til tekstgenerering
-    gen_kwargs = {
-        "max_length": 30,
-        "num_beams": 4
-    }
-
+    pixel_values = feature_extractor(image, return_tensors="pt").pixel_values.to(device)
+    
+    gen_kwargs = {"max_length": 30, "num_beams": 4}
     output_ids = model.generate(pixel_values, **gen_kwargs)
     preds = tokenizer.batch_decode(output_ids, skip_special_tokens=True)
     caption = preds[0].strip()
     return caption
 
 # ------------------------------------------------------------------------
-# 2. Eksempel på post-proces for at få en bestemt formatering (valgfrit)
+# 2. Custom description generation med filtrering og kreativ tekst
 # ------------------------------------------------------------------------
 def generate_custom_description(row, raw_caption):
     """
-    Eksempel på, hvordan du kan forme din tekst:
-    1) Kort overskrift (2-3 ord).
-    2) Materiale fra Excel (Quality).
-    3) Selve billedbeskrivelsen (evt. med filtrering af ord).
-    4) Tre bullet points.
+    Genererer en modeorienteret beskrivelse:
+      1. Filtrerer ud uønskede ord (fx "dog", "wall", "photo", osv.).
+      2. Skaber en kreativ overskrift baseret på Style Name.
+      3. Inkluderer materialeoplysninger fra Quality-kolonnen.
+      4. Tilføjer 3 bullet points med nøglefunktioner.
     """
-    # Fjern uønskede ord (fx "woman", "man", "wearing", osv.)
-    cleaned_caption = re.sub(r"\bwoman\b|\bman\b|\bwearing\b|\bperson\b|\bpeople\b", "", raw_caption, flags=re.IGNORECASE).strip()
+    # Fjern uønskede ord fra BLIP-beskrivelsen
+    unwanted_words = ["dog", "wall", "photo", "standing", "sitting", "background", "blurry"]
+    pattern = r'\b(?:' + '|'.join(unwanted_words) + r')\b'
+    cleaned_caption = re.sub(pattern, '', raw_caption, flags=re.IGNORECASE).strip()
+    cleaned_caption = re.sub(r'\s+', ' ', cleaned_caption)  # fjern ekstra mellemrum
 
-    # Eksempel på overskrift: "Chic <Style Name>"
+    # Skab en kreativ overskrift baseret på Style Name
     style_name = str(row.get("Style Name", "")).strip()
     if style_name:
-        short_title = f"Chic {style_name}"
+        # Eksempel: "Elegant SRMargot Dot Shirt" eller "Modern SRAnne Mayson Dress"
+        heading = f"Elegant {style_name}"
     else:
-        short_title = "Chic piece"
-
-    # Tilføj materiale fra "Quality"
-    material = str(row.get("Quality", "")).strip()
-    if material:
-        material_text = f"Made from {material}. "
+        heading = "Elegant Style"
+    
+    # Materiale fra Excel (Quality-kolonnen)
+    quality = str(row.get("Quality", "")).strip()
+    if quality:
+        material_text = f"Crafted from {quality}. "
     else:
         material_text = ""
+    
+    # Hovedbeskrivelse – brug BLIP-teksten hvis den er tilstrækkelig, ellers fallback
+    if len(cleaned_caption) < 10:
+        description_body = "A sophisticated design that embodies modern elegance."
+    else:
+        description_body = cleaned_caption
 
     bullet_points = [
-        "Comfortable fit",
-        "Timeless design",
-        "Versatile styling"
+        "Exquisite detailing",
+        "Superior craftsmanship",
+        "Timeless appeal"
     ]
-
-    # Byg endelig tekst
+    
     description = (
-        f"{short_title}\n\n"
-        f"{material_text}This style is best described as: {cleaned_caption}.\n\n"
-        "Key Features:\n"
-        + "\n".join(f"- {bp}" for bp in bullet_points)
+        f"{heading}\n\n"
+        f"{material_text}{description_body}\n\n"
+        "Key Features:\n" + "\n".join(f"- {bp}" for bp in bullet_points)
     )
     return description
 
 # ------------------------------------------------------------------------
-# 3. Cache & Tag-funktioner (som før)
+# 3. Cache & Tag-funktioner
 # ------------------------------------------------------------------------
 CACHE_FILE = ".streamlit/description_cache.json"
 
@@ -131,9 +130,7 @@ def update_b2c_tags(df):
     df["B2C Tags"] = df["B2C Tags"].fillna("").astype(str)
     for key, values in tag_translations.items():
         mask = df["Style Name"].str.contains(key, case=False, na=False)
-        df.loc[mask, "B2C Tags"] = df.loc[mask, "B2C Tags"].apply(
-            lambda x: ",".join(set(x.split(",") + values)).strip(",")
-        )
+        df.loc[mask, "B2C Tags"] = df.loc[mask, "B2C Tags"].apply(lambda x: ",".join(set(x.split(",") + values)).strip(","))
     df["Quality Tags"] = df["Quality"].str.replace(r"\d+%", "", regex=True)\
                                       .str.replace(r"[™()\-]", "", regex=True)\
                                       .str.strip()
@@ -214,9 +211,7 @@ if excel_file and zip_files:
             descriptions.append(cache[style_no])
         elif style_no in combined_image_mapping:
             image_path = combined_image_mapping[style_no]
-            # Kald modellen for at få en rå billedbeskrivelse
             raw_caption = analyze_image(image_path)
-            # Tilpas teksten til en salgsmæssig form
             final_desc = generate_custom_description(row, raw_caption)
             cache[style_no] = final_desc
             descriptions.append(final_desc)
@@ -225,7 +220,6 @@ if excel_file and zip_files:
     
     df["Description"] = descriptions
     
-    # Gem den opdaterede fil som en midlertidig fil
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
         df.to_excel(tmp.name, index=False, sheet_name='Updated Data with Descriptions')
         final_file_path = tmp.name

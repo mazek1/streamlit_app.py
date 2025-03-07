@@ -200,13 +200,13 @@ def extract_images_from_zip(zip_file):
                     image_mapping[style_no] = tmp_file.name
     return image_mapping
 
-# Antag, at den oprindelige kode allerede har defineret:
-# excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
-# og at du nu har:
+# Den oprindelige kode definerer allerede excel_file
+# fx: excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+# Og vi har:
 zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
 
 if excel_file and zip_files:
-    # Læs Excel-data direkte fra den uploadede fil
+    # Læs Excel-data direkte fra excel_file
     df = pd.read_excel(excel_file)
     
     combined_image_mapping = {}
@@ -214,7 +214,7 @@ if excel_file and zip_files:
         mapping = extract_images_from_zip(zip_file)
         combined_image_mapping.update(mapping)
     
-    # Brug "Style Number" hvis tilgængelig, ellers "Style Name"
+    # Brug "Style Number" hvis den findes, ellers "Style Name"
     style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
     
     cache = load_cache()
@@ -243,10 +243,6 @@ if excel_file and zip_files:
         final_file_path = tmp.name
     
     save_cache(cache)
-    
-    with open(final_file_path, "rb") as file:
-        st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
-
     
     with open(final_file_path, "rb") as file:
         st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")

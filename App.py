@@ -166,14 +166,11 @@ def parse_style_number(raw_str: str) -> str or None:
     if not raw_str:
         return None
     s = str(raw_str).upper().strip()
-    # Hvis der er en underscore, behold kun den del før den.
     if "_" in s:
         s = s.split("_", 1)[0]
-    # Først forsøg: Find et match med bindestreg.
     m = re.search(r"(SR\d{3}-\d{3})", s)
     if m:
         return m.group(1)
-    # Andet forsøg: Find et match uden bindestreg (6 cifre efter "SR")
     m = re.search(r"(SR\d{6})", s)
     if m:
         candidate = m.group(1)
@@ -184,17 +181,14 @@ def extract_images_from_zip(zip_file):
     """
     Udtrækker billeder fra ZIP-filen og returnerer et dictionary,
     der mapper et stylenummer (i formatet "SRxxx-xxx") til en midlertidig filsti.
-    Her nulstilles filens position, og billedfilnavnet splittes ved den første underscore.
     """
     image_mapping = {}
-    # Sørg for at starte fra begyndelsen
     zip_file.seek(0)
     with zipfile.ZipFile(zip_file) as z:
         for file_name in z.namelist():
             if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
                 base_name = os.path.basename(file_name)
                 base_no_ext = os.path.splitext(base_name)[0]
-                # Tag kun den del før den første underscore
                 if "_" in base_no_ext:
                     base_no_ext = base_no_ext.split("_", 1)[0]
                 style_no = parse_style_number(base_no_ext)
@@ -206,14 +200,21 @@ def extract_images_from_zip(zip_file):
                     image_mapping[style_no] = tmp_file.name
     return image_mapping
 
+# Antag, at den oprindelige kode allerede har defineret:
+# excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+# og at du nu har:
+zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
+
 if excel_file and zip_files:
-    # Indlæs den allerede behandlede Excel-fil
-    df = pd.read_excel(processed_file_path)
+    # Læs Excel-data direkte fra den uploadede fil
+    df = pd.read_excel(excel_file)
     
-    # Opret mapping for billeder fra ZIP-filen
-    image_mapping = extract_images_from_zip(zip_file)
+    combined_image_mapping = {}
+    for zip_file in zip_files:
+        mapping = extract_images_from_zip(zip_file)
+        combined_image_mapping.update(mapping)
     
-    # Brug "Style Number" hvis den findes, ellers "Style Name"
+    # Brug "Style Number" hvis tilgængelig, ellers "Style Name"
     style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
     
     cache = load_cache()
@@ -227,8 +228,8 @@ if excel_file and zip_files:
             continue
         if style_no in cache:
             descriptions.append(cache[style_no])
-        elif style_no in image_mapping:
-            image_path = image_mapping[style_no]
+        elif style_no in combined_image_mapping:
+            image_path = combined_image_mapping[style_no]
             desc = analyze_image_with_openai(image_path)
             cache[style_no] = desc
             descriptions.append(desc)
@@ -242,6 +243,10 @@ if excel_file and zip_files:
         final_file_path = tmp.name
     
     save_cache(cache)
+    
+    with open(final_file_path, "rb") as file:
+        st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
+
     
     with open(final_file_path, "rb") as file:
         st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")

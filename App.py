@@ -171,8 +171,13 @@ if excel_file and zip_files:
     df = pd.read_excel(excel_file)
     df = update_b2c_tags(df)
     
+    # Vælg kolonnen baseret på prioritet: "Style No." hvis den findes, ellers "Style Number"
+    if "Style No." in df.columns:
+        style_column = "Style No."
+    else:
+        style_column = "Style Number"
+    
     # Debug: Udskriv de udtrukne stylenumre fra Excel
-    style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
     for _, row in df.iterrows():
         raw_style = str(row[style_column]).strip()
         style_no = parse_style_number(raw_style)

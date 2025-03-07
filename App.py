@@ -115,7 +115,7 @@ if excel_file and zip_files:
     
     combined_image_mapping = {}
 for uploaded_zip in zip_files:
-    mapping = extract_images_from_zip(zip_file)
+    mapping = extract_images_from_zip(uploaded_zip)
     combined_image_mapping.update(mapping)
     
     style_column = "Style Number" if "Style Number" in df.columns else "Style Name"

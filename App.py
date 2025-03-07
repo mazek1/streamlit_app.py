@@ -11,10 +11,10 @@ from PIL import Image
 # Definer en fast sti til cache-filen, så den overlever genstarter
 CACHE_FILE = ".streamlit/description_cache.json"
 
+# Dummy‑funktioner – erstat disse med dine egentlige implementeringer, hvis du har dem.
 def analyze_image_with_openai(image_path):
-    """Bruger OpenAI Vision API til at analysere billedet og generere en professionel, inspirerende, kortfattet og salgsmæssig beskrivelse med tre key points."""
+    """Bruger OpenAI Vision API til at analysere billedet og generere en beskrivelse."""
     openai.api_key = os.getenv("OPENAI_API_KEY")  # Henter API-nøgle fra miljøvariabler
-    
     try:
         with open(image_path, "rb") as image_file:
             response = openai.ChatCompletion.create(
@@ -25,7 +25,6 @@ def analyze_image_with_openai(image_path):
                 ],
                 files={"image": image_file}
             )
-        
         if "choices" in response and response["choices"]:
             return response["choices"][0]["message"]["content"]
         else:
@@ -42,7 +41,7 @@ def load_cache():
 
 def save_cache(cache):
     """Gemmer cache-filen."""
-    os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)  # Sikrer at mappen eksisterer
+    os.makedirs(os.path.dirname(CACHE_FILE), exist_ok=True)
     with open(CACHE_FILE, "w") as file:
         json.dump(cache, file)
 
@@ -67,106 +66,18 @@ def update_b2c_tags(df):
         "tencel": ["tencel"],
         "lenzing": ["lenzing", "ecovero"]
     }
-
     df["B2C Tags"] = df["B2C Tags"].fillna("").astype(str)
-
     for key, values in tag_translations.items():
         mask = df["Style Name"].str.contains(key, case=False, na=False)
         df.loc[mask, "B2C Tags"] = df.loc[mask, "B2C Tags"].apply(
             lambda x: ",".join(set(x.split(",") + values)).strip(",")
         )
-    
-    # Tilføj materialekvaliteten som et tag uden procentdelen og fjern TM, () og bindestreger
     df["Quality Tags"] = df["Quality"].str.replace(r"\d+%", "", regex=True).str.replace(r"[™()\-]", "", regex=True).str.strip()
     df["Quality Tags"] = df["Quality Tags"].apply(lambda x: ",".join(set(x.split())))
     df["B2C Tags"] = df.apply(lambda row: ",".join(set([row["B2C Tags"], row["Quality Tags"]])) if row["Quality Tags"] else row["B2C Tags"], axis=1)
     df["B2C Tags"] = df["B2C Tags"].str.strip(",")
     df.drop(columns=["Quality Tags"], inplace=True)
-    
     return df
-
-def process_excel_and_zips(excel_file, zip_files):
-    # Indlæs Excel-fil
-    xls = pd.ExcelFile(excel_file)
-    df = pd.read_excel(xls, sheet_name=xls.sheet_names[0])
-    
-    # Opdater B2C Tags
-    df = update_b2c_tags(df)
-    
-    # Gem den opdaterede fil som en midlertidig fil
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-        df.to_excel(tmp.name, index=False, sheet_name='Updated Data')
-        tmp_path = tmp.name
-    
-    st.success("Processing Completed!")
-    return tmp_path
-
-# Streamlit UI
-st.title("Product Data Processor")
-
-# Ændr uploaderen for billeder, så den accepterer excel flere ZIP-filer
-excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
-
-# Opret uploader for ZIP-filer med en unik key:
-zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
-
-if excel_file and zip_files:
-    df = pd.read_excel(excel_file)
-    
-    combined_image_mapping = {}
-for uploaded_zip in zip_files:
-    mapping = extract_images_from_zip(uploaded_zip)
-    combined_image_mapping.update(mapping)
-    
-    style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
-    
-    cache = load_cache()
-    descriptions = []
-    
-    for _, row in df.iterrows():
-        raw_style = str(row[style_column]).strip()
-        style_no = parse_style_number(raw_style)
-        if style_no is None:
-            descriptions.append("No valid style number found.")
-            continue
-        if style_no in cache:
-            descriptions.append(cache[style_no])
-        elif style_no in combined_image_mapping:
-            image_path = combined_image_mapping[style_no]
-            desc = analyze_image_with_openai(image_path)
-            cache[style_no] = desc
-            descriptions.append(desc)
-        else:
-            descriptions.append(f"No matching image found for style {style_no}")
-    
-    df["Description"] = descriptions
-    
-    with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
-        df.to_excel(tmp.name, index=False, sheet_name='Updated Data with Descriptions')
-        final_file_path = tmp.name
-    
-    save_cache(cache)
-    
-    with open(final_file_path, "rb") as file:
-        st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")
-
-import streamlit as st
-import pandas as pd
-import zipfile
-import tempfile
-import os
-import re
-from io import BytesIO
-
-# Dummy-funktioner – erstat med dine egentlige implementeringer
-def load_cache():
-    return {}
-
-def save_cache(cache):
-    pass
-
-def analyze_image_with_openai(image_path):
-    return "Beskrivelse for " + os.path.basename(image_path)
 
 def parse_style_number(raw_str: str) -> str or None:
     """
@@ -179,14 +90,11 @@ def parse_style_number(raw_str: str) -> str or None:
     if not raw_str:
         return None
     s = str(raw_str).upper().strip()
-    # Behold kun den del før en eventuel underscore
     if "_" in s:
         s = s.split("_", 1)[0]
-    # Først forsøg: find et match med bindestreg
     m = re.search(r"(SR\d{3}-\d{3})", s)
     if m:
         return m.group(1)
-    # Andet forsøg: find et match uden bindestreg (6 cifre)
     m = re.search(r"(SR\d{6})", s)
     if m:
         candidate = m.group(1)
@@ -201,7 +109,6 @@ def extract_images_from_zip(uploaded_zip):
     """
     image_mapping = {}
     try:
-        # Læs filen som bytes og pak dem ind i et BytesIO-objekt
         zip_bytes = uploaded_zip.read()
         bytes_obj = BytesIO(zip_bytes)
         with zipfile.ZipFile(bytes_obj) as z:
@@ -209,7 +116,6 @@ def extract_images_from_zip(uploaded_zip):
                 if file_name.lower().endswith(('.png', '.jpg', '.jpeg')):
                     base_name = os.path.basename(file_name)
                     base_no_ext = os.path.splitext(base_name)[0]
-                    # Behold kun den del før den første underscore
                     if "_" in base_no_ext:
                         base_no_ext = base_no_ext.split("_", 1)[0]
                     style_no = parse_style_number(base_no_ext)
@@ -223,28 +129,21 @@ def extract_images_from_zip(uploaded_zip):
         st.write("Fejl i extract_images_from_zip:", e)
     return image_mapping
 
-# Her antages det, at den oprindelige kode allerede definerer Excel-uploaderen:
-excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
-
-# Opret uploader for ZIP-filer med accept_multiple_files=True og en unik key
-zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
-
-if excel_file and zip_files:
+def process_excel_and_zips(excel_file, zip_files):
     # Læs Excel-data direkte fra den uploadede fil
     df = pd.read_excel(excel_file)
     
+    # Kombiner billederne fra alle uploadede ZIP-filer
     combined_image_mapping = {}
-    # Her bruges variabelnavnet 'uploaded_zip' ensartet
-    for uploaded_zip in zip_files:
-        mapping = extract_images_from_zip(uploaded_zip)
+    for zip_file in zip_files:
+        mapping = extract_images_from_zip(zip_file)
         combined_image_mapping.update(mapping)
     
-    # Brug "Style Number" hvis tilgængelig, ellers "Style Name"
+    # Vælg den kolonne, der indeholder stylenumre (brug "Style Number" hvis den findes, ellers "Style Name")
     style_column = "Style Number" if "Style Number" in df.columns else "Style Name"
     
     cache = load_cache()
     descriptions = []
-    
     for _, row in df.iterrows():
         raw_style = str(row[style_column]).strip()
         style_no = parse_style_number(raw_style)
@@ -260,7 +159,6 @@ if excel_file and zip_files:
             descriptions.append(desc)
         else:
             descriptions.append(f"No matching image found for style {style_no}")
-    
     df["Description"] = descriptions
     
     with tempfile.NamedTemporaryFile(delete=False, suffix=".xlsx") as tmp:
@@ -268,6 +166,18 @@ if excel_file and zip_files:
         final_file_path = tmp.name
     
     save_cache(cache)
-    
+    return final_file_path
+
+# Streamlit UI
+st.title("Product Data Processor")
+
+# Excel uploader
+excel_file = st.file_uploader("Upload Excel File", type=["xlsx"])
+
+# ZIP-filer uploader (accepterer flere filer)
+zip_files = st.file_uploader("Upload ZIP Files with Images", type=["zip"], accept_multiple_files=True, key="zip_files")
+
+if excel_file and zip_files:
+    final_file_path = process_excel_and_zips(excel_file, zip_files)
     with open(final_file_path, "rb") as file:
         st.download_button("Download Final Excel File", file, "processed_data_with_descriptions.xlsx")

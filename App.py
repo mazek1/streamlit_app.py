@@ -9,14 +9,15 @@ import random
 from io import BytesIO
 from PIL import Image
 import torch
+import openai
 from transformers import VisionEncoderDecoderModel, ViTImageProcessor, AutoTokenizer
 
 # ------------------------------------------------------------------------
-# 1) Lazy-load ViT-GPT2 (nlpconnect/vit-gpt2-image-captioning)
+# 1) Lazy-load ViT-GPT2-modelen (nlpconnect/vit-gpt2-image-captioning)
 # ------------------------------------------------------------------------
 def analyze_image(image_path):
     """
-    Bruger ViT-GPT2 til billedbeskrivelse (mest for at fange 'long sleeve'/'short sleeve').
+    Anvender ViT-GPT2 til billedbeskrivelse (bruges primært til at fange nøgleattributter som 'long sleeve' osv.).
     """
     if "model" not in st.session_state:
         with st.spinner("Loading image captioning model..."):
@@ -41,19 +42,14 @@ def analyze_image(image_path):
     return caption
 
 # ------------------------------------------------------------------------
-# 2) Hjælpefunktioner til at parse type og materiale
+# 2) Hjælpefunktioner til parsing af data
 # ------------------------------------------------------------------------
 def get_fashion_type(style_name: str) -> str:
     """
-    Finder typen i Style Name (fx 'dress', 'shirt', 'blouse', 'knit' osv.).
-    Hvis intet match, returneres 'piece'.
+    Finder produktets type (fx 'dress', 'shirt', 'blouse', osv.) ud fra style name.
     """
     style_name_lower = style_name.lower()
-    type_map = [
-        "dress", "blouse", "shirt", "knit", "pants", "skirt",
-        "jacket", "blazer", "cardigan", "rollneck", "o-neck", "v-neck"
-    ]
-    for t in type_map:
+    for t in ["dress", "blouse", "shirt", "knit", "pants", "skirt", "jacket", "blazer", "cardigan", "rollneck", "o-neck", "v-neck"]:
         if t in style_name_lower:
             return t
     return "piece"
@@ -62,20 +58,13 @@ def parse_main_material(quality_str: str) -> str:
     """
     Finder det materiale med højest procent i Quality-kolonnen.
     Eksempel: "80% Viscose (LENZING™ ECOVERO™) 20% Nylon" -> "Viscose"
-    Hvis intet match, returneres tom streng.
     """
     if not quality_str:
         return ""
-    
-    # Regex for at fange "xx% <material>"
-    # Eksempel: "80% Viscose (LENZING™ ECOVERO™)" -> groups: ("80", "Viscose (LENZING™ ECOVERO™)")
     pattern = r"(\d+)%\s*([^%]+?)(?=\d+%|$)"
     matches = re.findall(pattern, quality_str)
-    # matches er en liste af tuples (pct, materiale)
     if not matches:
         return ""
-    
-    # Find match med højest procent
     best_pct = 0
     best_mat = ""
     for (pct_str, mat_str) in matches:
@@ -83,89 +72,58 @@ def parse_main_material(quality_str: str) -> str:
         if pct > best_pct:
             best_pct = pct
             best_mat = mat_str.strip()
-    
-    # Fjern paranteser, varemærker og ekstra mellemrum
-    # F.eks. "Viscose (LENZING™ ECOVERO™)" -> "Viscose"
-    best_mat = re.sub(r"\(.*?\)", "", best_mat)  # fjern alt i ( )
-    best_mat = re.sub(r"™", "", best_mat)       # fjern ™
-    best_mat = best_mat.strip()
+    best_mat = re.sub(r"\(.*?\)", "", best_mat)
+    best_mat = re.sub(r"™", "", best_mat).strip()
     return best_mat
 
-# Nogle tilfældige ord til overskrift
-HEADWORD_CHOICES = [
-    "Chic", "Stylish", "Cosy", "Modern", "Refined",
-    "Sophisticated", "Fashionable", "Trendy", "Luxurious", "Elegant"
-]
-
-# Nogle tilfældige ord til "crafted from"
-MATERIAL_PHRASES = [
-    "crafted from", "made of", "expertly woven from",
-    "produced in", "beautifully composed of"
-]
-
 # ------------------------------------------------------------------------
-# 3) Opret en modefokuseret tekst (med random ordvalg)
+# 3) Generer en beskrivelse med GPT-4
 # ------------------------------------------------------------------------
-def generate_custom_description(row, raw_caption):
+def generate_description_with_gpt4(row, raw_caption):
     """
-    1) Vælg en tilfældig overskrifts-stil (fx "Chic", "Cosy") + type (dress, blouse, shirt, etc.).
-    2) Find hovedmaterialet (højeste procent).
-    3) Fanger 'long sleeve' eller 'short sleeve' fra billedets caption.
-    4) Saml en lille tekst.
+    Kombinerer produktdata og billedcaption til en prompt,
+    som sendes til GPT-4 for at generere en salgsorienteret, modefokuseret produktbeskrivelse.
+    Beskrivelsen skal:
+      - Indholde en kort, catchy titel (kun typen, fx "Chic shirt" eller "Cosy dress"),
+      - Indholde en sætning om produktet og hovedmaterialet (kun den med højeste procent),
+      - Inkludere tre bullet points med nøglefunktioner.
     """
     style_name = str(row.get("Style Name", "")).strip()
-    # a) Find type
     fashion_type = get_fashion_type(style_name)
-    
-    # b) Random headword
-    headword = random.choice(HEADWORD_CHOICES)
-    
-    # c) Parse main material
     quality = str(row.get("Quality", "")).strip()
     main_material = parse_main_material(quality)
     
-    # d) Tjek for "long sleeve" eller "short sleeve"
-    raw_lower = raw_caption.lower()
-    if "long sleeve" in raw_lower:
-        sleeve_info = "Long-sleeve"
-    elif "short sleeve" in raw_lower:
-        sleeve_info = "Short-sleeve"
-    else:
-        sleeve_info = ""
+    # Opbyg prompt til GPT-4
+    prompt = f"""You are a professional fashion copywriter. Using the following product data, generate a compelling, sales-oriented product description for a fashion website. The description must:
+- Begin with a catchy title consisting of 2-3 words that only mentions the product type (for example: "Chic shirt", "Cosy dress", etc.).
+- Include one sentence that describes the product and its main material (only include the material with the highest percentage, e.g. "Viscose").
+- End with three bullet points highlighting key features such as comfort, design, and versatility.
+Do not mention irrelevant details such as people, backgrounds, or animals.
 
-    # e) Byg overskrift (fx "Chic shirt")
-    heading = f"{headword} {fashion_type}"
+Product Data:
+- Product Type: {fashion_type}
+- Main Material: {main_material if main_material else "Unknown"}
+- Image Caption (attributes only): {raw_caption}
 
-    # f) Vælg et random synonym for 'crafted from'
-    mat_phrase = random.choice(MATERIAL_PHRASES)
-    if main_material:
-        mat_sentence = f"{mat_phrase} {main_material}."
-    else:
-        mat_sentence = ""
-
-    # g) Byg en sætning om style (inkl. sleeve info, hvis fundet)
-    if sleeve_info:
-        style_sentence = f"This {fashion_type} features a {sleeve_info} design, perfect for any occasion."
-    else:
-        style_sentence = f"This {fashion_type} is designed for timeless versatility."
-
-    # h) Tre bullet points (kan tilpasses)
-    bullet_points = [
-        "Modern silhouette",
-        "Comfortable for daily wear",
-        "Effortless styling options"
-    ]
-
-    description = (
-        f"{heading}\n\n"
-        f"{mat_sentence} {style_sentence}\n\n"
-        "Key Features:\n" + "\n".join(f"- {bp}" for bp in bullet_points)
-    )
+Write the final description in English."""
     
-    return description.strip()
+    try:
+        response = openai.ChatCompletion.create(
+            model="gpt-4",
+            messages=[
+                {"role": "system", "content": "You are a professional fashion copywriter."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.7,
+            max_tokens=200
+        )
+        generated_text = response["choices"][0]["message"]["content"].strip()
+        return generated_text
+    except Exception as e:
+        return f"Error generating description with GPT-4: {str(e)}"
 
 # ------------------------------------------------------------------------
-# 4) Cache & Tag-funktioner
+# 4) Cache & Tag-funktioner (samme som tidligere)
 # ------------------------------------------------------------------------
 CACHE_FILE = ".streamlit/description_cache.json"
 
@@ -260,6 +218,7 @@ if excel_file and zip_files:
     df = pd.read_excel(excel_file)
     df = update_b2c_tags(df)
     
+    # Brug kun kolonnerne "Style No." eller "Style Number"
     if "Style No." in df.columns:
         style_column = "Style No."
     else:
@@ -284,8 +243,10 @@ if excel_file and zip_files:
             descriptions.append(cache[style_no])
         elif style_no in combined_image_mapping:
             image_path = combined_image_mapping[style_no]
+            # Få en rå caption fra den lokale model
             raw_caption = analyze_image(image_path)
-            final_desc = generate_custom_description(row, raw_caption)
+            # Brug GPT-4 til at generere den endelige beskrivelse
+            final_desc = generate_description_with_gpt4(row, raw_caption)
             cache[style_no] = final_desc
             descriptions.append(final_desc)
         else:

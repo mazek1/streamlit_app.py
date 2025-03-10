@@ -5,18 +5,18 @@ import os
 import tempfile
 import json
 import re
+import random
 from io import BytesIO
 from PIL import Image
 import torch
 from transformers import VisionEncoderDecoderModel, ViTImageProcessor, AutoTokenizer
 
 # ------------------------------------------------------------------------
-# 1. Lazy-load ViT-GPT2-modelen (fra nlpconnect/vit-gpt2-image-captioning)
+# 1) Lazy-load ViT-GPT2 (nlpconnect/vit-gpt2-image-captioning)
 # ------------------------------------------------------------------------
 def analyze_image(image_path):
     """
-    Anvender ViT-GPT2 til billedbeskrivelse.
-    Modellen loades først, når funktionen kaldes første gang.
+    Bruger ViT-GPT2 til billedbeskrivelse (mest for at fange 'long sleeve'/'short sleeve').
     """
     if "model" not in st.session_state:
         with st.spinner("Loading image captioning model..."):
@@ -41,58 +41,131 @@ def analyze_image(image_path):
     return caption
 
 # ------------------------------------------------------------------------
-# 2. Custom description generation med filtrering og kreativ tekst
+# 2) Hjælpefunktioner til at parse type og materiale
+# ------------------------------------------------------------------------
+def get_fashion_type(style_name: str) -> str:
+    """
+    Finder typen i Style Name (fx 'dress', 'shirt', 'blouse', 'knit' osv.).
+    Hvis intet match, returneres 'piece'.
+    """
+    style_name_lower = style_name.lower()
+    type_map = [
+        "dress", "blouse", "shirt", "knit", "pants", "skirt",
+        "jacket", "blazer", "cardigan", "rollneck", "o-neck", "v-neck"
+    ]
+    for t in type_map:
+        if t in style_name_lower:
+            return t
+    return "piece"
+
+def parse_main_material(quality_str: str) -> str:
+    """
+    Finder det materiale med højest procent i Quality-kolonnen.
+    Eksempel: "80% Viscose (LENZING™ ECOVERO™) 20% Nylon" -> "Viscose"
+    Hvis intet match, returneres tom streng.
+    """
+    if not quality_str:
+        return ""
+    
+    # Regex for at fange "xx% <material>"
+    # Eksempel: "80% Viscose (LENZING™ ECOVERO™)" -> groups: ("80", "Viscose (LENZING™ ECOVERO™)")
+    pattern = r"(\d+)%\s*([^%]+?)(?=\d+%|$)"
+    matches = re.findall(pattern, quality_str)
+    # matches er en liste af tuples (pct, materiale)
+    if not matches:
+        return ""
+    
+    # Find match med højest procent
+    best_pct = 0
+    best_mat = ""
+    for (pct_str, mat_str) in matches:
+        pct = int(pct_str)
+        if pct > best_pct:
+            best_pct = pct
+            best_mat = mat_str.strip()
+    
+    # Fjern paranteser, varemærker og ekstra mellemrum
+    # F.eks. "Viscose (LENZING™ ECOVERO™)" -> "Viscose"
+    best_mat = re.sub(r"\(.*?\)", "", best_mat)  # fjern alt i ( )
+    best_mat = re.sub(r"™", "", best_mat)       # fjern ™
+    best_mat = best_mat.strip()
+    return best_mat
+
+# Nogle tilfældige ord til overskrift
+HEADWORD_CHOICES = [
+    "Chic", "Stylish", "Cosy", "Modern", "Refined",
+    "Sophisticated", "Fashionable", "Trendy", "Luxurious", "Elegant"
+]
+
+# Nogle tilfældige ord til "crafted from"
+MATERIAL_PHRASES = [
+    "crafted from", "made of", "expertly woven from",
+    "produced in", "beautifully composed of"
+]
+
+# ------------------------------------------------------------------------
+# 3) Opret en modefokuseret tekst (med random ordvalg)
 # ------------------------------------------------------------------------
 def generate_custom_description(row, raw_caption):
     """
-    Genererer en modeorienteret beskrivelse:
-      1. Filtrerer ud uønskede ord (fx "dog", "wall", "photo", osv.).
-      2. Skaber en kreativ overskrift baseret på Style Name.
-      3. Inkluderer materialeoplysninger fra Quality-kolonnen.
-      4. Tilføjer 3 bullet points med nøglefunktioner.
+    1) Vælg en tilfældig overskrifts-stil (fx "Chic", "Cosy") + type (dress, blouse, shirt, etc.).
+    2) Find hovedmaterialet (højeste procent).
+    3) Fanger 'long sleeve' eller 'short sleeve' fra billedets caption.
+    4) Saml en lille tekst.
     """
-    # Fjern uønskede ord fra BLIP-beskrivelsen
-    unwanted_words = ["dog", "wall", "photo", "standing", "sitting", "background", "blurry"]
-    pattern = r'\b(?:' + '|'.join(unwanted_words) + r')\b'
-    cleaned_caption = re.sub(pattern, '', raw_caption, flags=re.IGNORECASE).strip()
-    cleaned_caption = re.sub(r'\s+', ' ', cleaned_caption)  # fjern ekstra mellemrum
-
-    # Skab en kreativ overskrift baseret på Style Name
     style_name = str(row.get("Style Name", "")).strip()
-    if style_name:
-        # Eksempel: "Elegant SRMargot Dot Shirt" eller "Modern SRAnne Mayson Dress"
-        heading = f"Elegant {style_name}"
-    else:
-        heading = "Elegant Style"
+    # a) Find type
+    fashion_type = get_fashion_type(style_name)
     
-    # Materiale fra Excel (Quality-kolonnen)
+    # b) Random headword
+    headword = random.choice(HEADWORD_CHOICES)
+    
+    # c) Parse main material
     quality = str(row.get("Quality", "")).strip()
-    if quality:
-        material_text = f"Crafted from {quality}. "
-    else:
-        material_text = ""
+    main_material = parse_main_material(quality)
     
-    # Hovedbeskrivelse – brug BLIP-teksten hvis den er tilstrækkelig, ellers fallback
-    if len(cleaned_caption) < 10:
-        description_body = "A sophisticated design that embodies modern elegance."
+    # d) Tjek for "long sleeve" eller "short sleeve"
+    raw_lower = raw_caption.lower()
+    if "long sleeve" in raw_lower:
+        sleeve_info = "Long-sleeve"
+    elif "short sleeve" in raw_lower:
+        sleeve_info = "Short-sleeve"
     else:
-        description_body = cleaned_caption
+        sleeve_info = ""
 
+    # e) Byg overskrift (fx "Chic shirt")
+    heading = f"{headword} {fashion_type}"
+
+    # f) Vælg et random synonym for 'crafted from'
+    mat_phrase = random.choice(MATERIAL_PHRASES)
+    if main_material:
+        mat_sentence = f"{mat_phrase} {main_material}."
+    else:
+        mat_sentence = ""
+
+    # g) Byg en sætning om style (inkl. sleeve info, hvis fundet)
+    if sleeve_info:
+        style_sentence = f"This {fashion_type} features a {sleeve_info} design, perfect for any occasion."
+    else:
+        style_sentence = f"This {fashion_type} is designed for timeless versatility."
+
+    # h) Tre bullet points (kan tilpasses)
     bullet_points = [
-        "Exquisite detailing",
-        "Superior craftsmanship",
-        "Timeless appeal"
+        "Modern silhouette",
+        "Comfortable for daily wear",
+        "Effortless styling options"
     ]
-    
+
     description = (
         f"{heading}\n\n"
-        f"{material_text}{description_body}\n\n"
+        f"{mat_sentence} {style_sentence}\n\n"
         "Key Features:\n" + "\n".join(f"- {bp}" for bp in bullet_points)
     )
-    return description
+    
+    return description.strip()
 
 # ------------------------------------------------------------------------
-# 3. Cache & Tag-funktioner
+# 4) Cache & Tag-funktioner
 # ------------------------------------------------------------------------
 CACHE_FILE = ".streamlit/description_cache.json"
 
@@ -176,7 +249,7 @@ def extract_images_from_zip(uploaded_zip):
     return image_mapping
 
 # ------------------------------------------------------------------------
-# 4. Streamlit UI
+# 5) Streamlit UI
 # ------------------------------------------------------------------------
 st.title("Product Data Processor")
 
